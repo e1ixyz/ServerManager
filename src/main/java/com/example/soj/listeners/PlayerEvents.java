@@ -25,12 +25,13 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Start/stop logic:
- * - Start on first join (primary): kick with message, backend boots.
- * - /server <non-primary>: start offline target, keep player online, auto-send when ready.
- * - Per-server stop: whenever a backend becomes empty, schedule a stop after stopGraceSeconds.
- * - Proxy-empty stop: if proxy has zero players, stop ALL after stopGraceSeconds (+ optional startup grace bump).
- * - MOTD: shows "online" only after a successful ping heartbeat (not just process running).
+ * Features:
+ * - Dynamic MOTD via MiniMessage; shows "online" only after a successful ping.
+ * - Primary start-on-first-join (kick-to-start).
+ * - /server <target>: starts offline target, keeps player online, auto-sends when ready.
+ * - Per-server stop: when a backend becomes empty, stop after stopGraceSeconds.
+ * - Proxy-empty stop: if proxy has zero players, stop ALL after stopGraceSeconds
+ *   (with startupGraceSeconds bump if a server just started).
  */
 public final class PlayerEvents {
   /** How long to wait for a started backend before timing out auto-send (seconds). */
@@ -42,7 +43,7 @@ public final class PlayerEvents {
   private final ServerProcessManager mgr;
   private final Logger log;
 
-  /** Proxy-empty stop-all */
+  /** Proxy-empty stop-all task */
   private volatile ScheduledTask pendingStopAll;
 
   /** Per-server scheduled stop tasks for empty servers */
@@ -58,6 +59,7 @@ public final class PlayerEvents {
 
   /** Lightweight readiness cache: true only after a successful ping. */
   private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
+  @SuppressWarnings("FieldCanBeLocal")
   private final ScheduledTask heartbeatTask;
 
   public PlayerEvents(Object pluginOwner, ProxyServer proxy, Config cfg, ServerProcessManager mgr, Logger log) {
@@ -88,6 +90,7 @@ public final class PlayerEvents {
 
     boolean online = false;
     if (primary != null) {
+      // Show online only when a ping recently succeeded
       online = Boolean.TRUE.equals(isReadyCache.get(primary));
       if (isReadyCache.get(primary) == null && !mgr.isRunning(primary)) {
         online = false;
@@ -119,9 +122,9 @@ public final class PlayerEvents {
       } catch (IOException ex) {
         log.error("Failed to start primary server {}", primary, ex);
       }
-      // Kick to menu with simple text
+      // Kick to menu with simple text (disconnect screen isn't MiniMessage)
       e.setResult(LoginEvent.ComponentResult.denied(Component.text(cfg.kickMessage)));
-      // Proxy is about to be empty (they're kicked); schedule stop-all (with startup grace bump)
+      // After kick, proxy becomes empty; arm stop-all safety with grace bump
       scheduleStopAllIfProxyEmpty();
     }
   }
@@ -193,7 +196,6 @@ public final class PlayerEvents {
     cancelPendingStopAll(); // proxy not empty
 
     // Cancel any pending stop for the server they just joined
-    e.getServer().getServerInfo();
     String joined = e.getServer().getServerInfo().getName();
     cancelPendingServerStop(joined);
 
@@ -258,7 +260,7 @@ public final class PlayerEvents {
 
   /** Arm a stop-all when the entire proxy is empty (covers kick-to-start case). */
   private void scheduleStopAllIfProxyEmpty() {
-    // debounce slightly to let Velocity update player list
+    // Debounce slightly to let Velocity update player list
     proxy.getScheduler().buildTask(pluginOwner, () -> {
       if (!proxy.getAllPlayers().isEmpty()) return;
       if (pendingStopAll != null) return;
@@ -306,6 +308,7 @@ public final class PlayerEvents {
     cancelPendingConnect(id);
     pendingConnectStartMs.put(id, System.currentTimeMillis());
     waitingTarget.put(id, serverName);
+    // Allow one “ready” fire for this new wait
     readyNotifyOnce.remove(id);
 
     var task = proxy.getScheduler().buildTask(pluginOwner, () -> {
@@ -325,7 +328,7 @@ public final class PlayerEvents {
       if ((System.currentTimeMillis() - start) > START_CONNECT_TIMEOUT_SECONDS * 1000L) {
         cancelPendingConnect(id);
         player.sendMessage(mm(cfg.messages.timeout, serverName, player.getUsername()));
-        // No one joined this target and we timed out: enforce "no backend without players"
+        // Enforce "no backend without players" if nobody reached it
         if (countPlayersOn(serverName) == 0 && mgr.isRunning(serverName)) {
           try {
             log.info("[{}] auto-send timeout; no players joined -> stopping.", serverName);
@@ -346,15 +349,22 @@ public final class PlayerEvents {
       }
 
       var rs = opt.get();
-
       rs.ping().whenComplete((ping, err) -> {
         if (err != null) return; // still not ready
         isReadyCache.put(serverName, Boolean.TRUE);
 
         if (!serverName.equals(waitingTarget.get(id))) return;
-        if (!readyNotifyOnce.add(id)) return; // already fired once
+        if (!readyNotifyOnce.add(id)) return; // already fired once for this wait
 
+        // Ensure player is still online on the proxy before messaging/connecting
+        if (proxy.getPlayer(id).isEmpty()) {
+          cancelPendingConnect(id);
+          return;
+        }
+
+        // Stop the poller but DO NOT clear readyNotifyOnce here
         cancelPendingConnect(id);
+
         proxy.getScheduler().buildTask(pluginOwner, () -> {
           player.sendMessage(mm(cfg.messages.readySending, serverName, player.getUsername()));
           cancelPendingServerStop(serverName); // ensure no pending empty-stop fights us
@@ -371,7 +381,8 @@ public final class PlayerEvents {
     if (t != null) t.cancel();
     pendingConnectStartMs.remove(id);
     waitingTarget.remove(id);
-    readyNotifyOnce.remove(id);
+    // IMPORTANT: do NOT clear readyNotifyOnce here.
+    // It is cleared only when starting a new wait in queueAutoSend().
   }
 
   // -------------------- Utility --------------------
