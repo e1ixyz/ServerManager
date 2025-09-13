@@ -19,12 +19,14 @@ import org.slf4j.Logger;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Handles: dynamic MOTD (MiniMessage), primary start-on-first-join (kick-to-start),
  * non-primary /server starts with in-proxy queue+auto-connect, and stop-on-empty with grace.
+ * Also: readiness cache (only show online when ping succeeds) and single-fire "ready" messages.
  */
 public final class PlayerEvents {
   /** How long to wait for a started backend before timing out auto-send (seconds). */
@@ -42,8 +44,14 @@ public final class PlayerEvents {
   /** Per-player poller state for “wait until backend is ready, then connect”. */
   private final Map<UUID, ScheduledTask> pendingConnect = new ConcurrentHashMap<>();
   private final Map<UUID, Long> pendingConnectStartMs = new ConcurrentHashMap<>();
-  /** Which target a player is currently waiting for (de-dupes ready messages). */
+  /** Which target a player is currently waiting for (de-dupes requeues). */
   private final Map<UUID, String> waitingTarget = new ConcurrentHashMap<>();
+  /** Ensures the "ready → sending you now" path fires only once per wait. */
+  private final Set<UUID> readyNotifyOnce = ConcurrentHashMap.newKeySet();
+
+  /** Lightweight readiness cache: true only after a successful ping. */
+  private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
+  private final ScheduledTask heartbeatTask;
 
   public PlayerEvents(Object pluginOwner, ProxyServer proxy, Config cfg, ServerProcessManager mgr, Logger log) {
     this.pluginOwner = pluginOwner;
@@ -51,15 +59,38 @@ public final class PlayerEvents {
     this.cfg = cfg;
     this.mgr = mgr;
     this.log = log;
+
+    // Periodically ping all known servers to update readiness (for accurate MOTD)
+    this.heartbeatTask = proxy.getScheduler().buildTask(pluginOwner, () -> {
+      for (String name : cfg.servers.keySet()) {
+        // If not running, it's definitely not ready
+        if (!mgr.isRunning(name)) {
+          isReadyCache.put(name, Boolean.FALSE);
+          continue;
+        }
+        proxy.getServer(name).ifPresent(rs -> rs.ping().whenComplete((ok, err) -> {
+          isReadyCache.put(name, err == null);
+        }));
+      }
+    }).delay(Duration.ofSeconds(1)).repeat(Duration.ofSeconds(2)).schedule();
   }
 
   // ------------------------------------------------------------
-  // MOTD (MiniMessage; 2 lines from config)
+  // MOTD (MiniMessage; 2 lines from config; "online" only after ping success)
   // ------------------------------------------------------------
   @Subscribe
   public void onPing(ProxyPingEvent e) {
     String primary = cfg.primaryServerName();
-    boolean online = (primary != null) && mgr.isRunning(primary);
+
+    boolean online = false;
+    if (primary != null) {
+      // Show online only when we KNOW it's ready (successful ping in the last heartbeat)
+      online = Boolean.TRUE.equals(isReadyCache.get(primary));
+      // If we have no cache yet and it's not running, definitely offline
+      if (isReadyCache.get(primary) == null && !mgr.isRunning(primary)) {
+        online = false;
+      }
+    }
 
     String l1 = online ? cfg.motd.online  : cfg.motd.offline;
     String l2 = online ? cfg.motd.online2 : cfg.motd.offline2;
@@ -194,6 +225,11 @@ public final class PlayerEvents {
 
         log.info("Proxy has been empty for {}s; stopping all managed servers...", delaySeconds);
         mgr.stopAllGracefully();
+
+        // Once we stop everything, clear readiness cache
+        for (String name : cfg.servers.keySet()) {
+          isReadyCache.put(name, Boolean.FALSE);
+        }
       }).delay(Duration.ofSeconds(delaySeconds)).schedule();
 
       if (startupGraceActive) {
@@ -222,6 +258,7 @@ public final class PlayerEvents {
     cancelPendingConnect(id); // de-dupe per player
     pendingConnectStartMs.put(id, System.currentTimeMillis());
     waitingTarget.put(id, serverName);
+    readyNotifyOnce.remove(id); // allow one "ready" fire for this new wait
 
     var task = proxy.getScheduler().buildTask(pluginOwner, () -> {
       // Still online on the proxy?
@@ -260,8 +297,12 @@ public final class PlayerEvents {
       rs.ping().whenComplete((ping, err) -> {
         if (err != null) return; // still not ready; try again next tick
 
-        // Double-check we’re still waiting for THIS server.
+        // Update readiness cache
+        isReadyCache.put(serverName, Boolean.TRUE);
+
+        // Double-check we’re still waiting for THIS server & only fire once.
         if (!serverName.equals(waitingTarget.get(id))) return;
+        if (!readyNotifyOnce.add(id)) return; // already fired once for this wait
 
         // It’s ready! Cancel polling and hop onto Velocity’s scheduler to connect.
         cancelPendingConnect(id);
@@ -280,6 +321,7 @@ public final class PlayerEvents {
     if (t != null) t.cancel();
     pendingConnectStartMs.remove(id);
     waitingTarget.remove(id);
+    readyNotifyOnce.remove(id);
   }
 
   // ------------------------------------------------------------
