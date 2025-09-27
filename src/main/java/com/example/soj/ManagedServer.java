@@ -37,40 +37,44 @@ final class ManagedServer {
       throw new IllegalStateException("workingDir and startCommand required for " + name);
 
     starting = true;
-    ProcessBuilder pb = shellCommand(cfg.startCommand);
-    pb.directory(new File(cfg.workingDir));
-    pb.redirectErrorStream(true);
+    try {
+      ProcessBuilder pb = shellCommand(cfg.startCommand);
+      pb.directory(new File(cfg.workingDir));
+      pb.redirectErrorStream(true);
 
-    if (Boolean.TRUE.equals(cfg.logToFile)) {
-      File out = (cfg.logFile != null && !cfg.logFile.isBlank())
-          ? new File(cfg.logFile)
-          : new File("proxy-managed.log");
-      if (!out.isAbsolute()) out = new File(cfg.workingDir, out.getPath());
-      if (out.getParentFile() != null) out.getParentFile().mkdirs();
-      pb.redirectOutput(out); // Send all output to file
-      log.info("[{}] logging to {}", name, out.getPath().replace('\\','/'));
+      if (Boolean.TRUE.equals(cfg.logToFile)) {
+        File out = (cfg.logFile != null && !cfg.logFile.isBlank())
+            ? new File(cfg.logFile)
+            : new File("proxy-managed.log");
+        if (!out.isAbsolute()) out = new File(cfg.workingDir, out.getPath());
+        if (out.getParentFile() != null) out.getParentFile().mkdirs();
+        pb.redirectOutput(out); // Send all output to file
+        log.info("[{}] logging to {}", name, out.getPath().replace('\\','/'));
+      }
+
+      Process started = pb.start();
+      process = started;
+      lastStartMs = System.currentTimeMillis();
+
+      // If not logging to file, stream to Velocity logger as before
+      if (!Boolean.TRUE.equals(cfg.logToFile)) {
+        Thread t = new Thread(() -> {
+          try (BufferedReader br = new BufferedReader(
+              new InputStreamReader(started.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+              log.info("[{}] {}", name, line);
+            }
+          } catch (IOException ignored) {}
+        }, "ms-log-" + name);
+        t.setDaemon(true);
+        t.start();
+      }
+
+      log.info("[{}] started (pid? {})", name, started.pid());
+    } finally {
+      starting = false;
     }
-
-    process = pb.start();
-    starting = false;
-    lastStartMs = System.currentTimeMillis();
-
-    // If not logging to file, stream to Velocity logger as before
-    if (!Boolean.TRUE.equals(cfg.logToFile)) {
-      Thread t = new Thread(() -> {
-        try (BufferedReader br = new BufferedReader(
-            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-          String line;
-          while ((line = br.readLine()) != null) {
-            log.info("[{}] {}", name, line);
-          }
-        } catch (IOException ignored) {}
-      }, "ms-log-" + name);
-      t.setDaemon(true);
-      t.start();
-    }
-
-    log.info("[{}] started (pid? {})", name, process.pid());
   }
 
   synchronized void stopGracefully() {

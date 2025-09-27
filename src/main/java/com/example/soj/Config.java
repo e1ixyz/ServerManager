@@ -21,6 +21,8 @@ public final class Config {
   public static final class Motd {
     public String offline  = "<gray>eli server :3</gray>";
     public String offline2 = "<red><bold>Server Offline - Join to Start</bold></red>";
+    public String starting = "<yellow><bold>Server Starting</bold></yellow>";
+    public String starting2 = "<gray>Please wait...</gray>";
     public String online   = "<gray>eli server :3</gray>";
     public String online2  = "<green><bold>Server Online</bold></green>";
   }
@@ -52,6 +54,8 @@ public final class Config {
         motd:
           offline:  "<gray>eli server :3</gray>"
           offline2: "<red><bold>Server Offline - Join to Start</bold></red>"
+          starting: "<yellow><bold>Server Starting</bold></yellow>"
+          starting2: "<gray>Please wait...</gray>"
           online:   "<gray>eli server :3</gray>"
           online2:  "<green><bold>Server Online</bold></green>"
         messages:

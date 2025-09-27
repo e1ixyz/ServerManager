@@ -3,6 +3,7 @@ package com.example.soj.commands;
 import com.example.soj.Config;
 import com.example.soj.ServerProcessManager;
 import com.velocitypowered.api.command.SimpleCommand;
+import com.velocitypowered.api.proxy.Player;
 import net.kyori.adventure.text.Component;
 import org.slf4j.Logger;
 
@@ -38,6 +39,13 @@ public final class StartCmd implements SimpleCommand {
   }
 
   @Override public boolean hasPermission(Invocation invocation) {
-    return invocation.source().hasPermission("startonjoin.start");
+    var src = invocation.source();
+    if (!(src instanceof Player)) return true;
+    return src.hasPermission("servermanager.command.start")
+        || src.hasPermission("servermanager.command.*")
+        || src.hasPermission("servermanager.start")
+        || src.hasPermission("servermanager.*")
+        || src.hasPermission("startonjoin.start")
+        || src.hasPermission("startonjoin.*");
   }
 }

@@ -5,6 +5,8 @@ stopGraceSeconds: 60
 motd:
   offline:  "<gray>eli network</gray>"
   offline2: "<red><bold>Server Offline - Join to Start</bold></red>"
+  starting: "<yellow><bold>Server Starting</bold></yellow>"
+  starting2: "<gray>Please wait...</gray>"
   online:   "<gray>eli network</gray>"
   online2:  "<green><bold>Server Online</bold></green>"
 

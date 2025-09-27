@@ -2,6 +2,7 @@ package com.example.soj.commands;
 
 import com.example.soj.ServerProcessManager;
 import com.velocitypowered.api.command.SimpleCommand;
+import com.velocitypowered.api.proxy.Player;
 import net.kyori.adventure.text.Component;
 
 public final class StopCmd implements SimpleCommand {
@@ -29,6 +30,13 @@ public final class StopCmd implements SimpleCommand {
   }
 
   @Override public boolean hasPermission(Invocation invocation) {
-    return invocation.source().hasPermission("startonjoin.stop");
+    var src = invocation.source();
+    if (!(src instanceof Player)) return true;
+    return src.hasPermission("servermanager.command.stop")
+        || src.hasPermission("servermanager.command.*")
+        || src.hasPermission("servermanager.stop")
+        || src.hasPermission("servermanager.*")
+        || src.hasPermission("startonjoin.stop")
+        || src.hasPermission("startonjoin.*");
   }
 }

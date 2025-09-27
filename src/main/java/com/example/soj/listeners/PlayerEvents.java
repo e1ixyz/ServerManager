@@ -88,17 +88,27 @@ public final class PlayerEvents {
   public void onPing(ProxyPingEvent e) {
     String primary = cfg.primaryServerName();
 
-    boolean online = false;
+    String l1 = cfg.motd.offline;
+    String l2 = cfg.motd.offline2;
+
     if (primary != null) {
-      // Show online only when a ping recently succeeded
-      online = Boolean.TRUE.equals(isReadyCache.get(primary));
-      if (isReadyCache.get(primary) == null && !mgr.isRunning(primary)) {
-        online = false;
+      boolean running = mgr.isRunning(primary);
+      Boolean ready = isReadyCache.get(primary);
+      boolean online = Boolean.TRUE.equals(ready);
+      boolean starting = running && !online;
+
+      if (online) {
+        l1 = cfg.motd.online;
+        l2 = cfg.motd.online2;
+      } else if (starting) {
+        l1 = firstNonBlank(cfg.motd.starting, cfg.motd.online, cfg.motd.offline);
+        l2 = firstNonBlank(cfg.motd.starting2, cfg.motd.online2, cfg.motd.offline2);
+      } else {
+        l1 = cfg.motd.offline;
+        l2 = cfg.motd.offline2;
       }
     }
 
-    String l1 = online ? cfg.motd.online  : cfg.motd.offline;
-    String l2 = online ? cfg.motd.online2 : cfg.motd.offline2;
     String mm = (l2 == null || l2.isBlank()) ? (l1 == null ? "" : l1) : (l1 + "<newline>" + l2);
 
     Component description = MiniMessage.miniMessage().deserialize(mm);
@@ -400,6 +410,14 @@ public final class PlayerEvents {
         .replace("{server}", "<server>").replace("(server)", "<server>")
         .replace("{player}", "<player>").replace("(player)", "<player>")
         .replace("{state}", "<state>").replace("(state)", "<state>");
+  }
+
+  private static String firstNonBlank(String... options) {
+    if (options == null) return "";
+    for (String opt : options) {
+      if (opt != null && !opt.isBlank()) return opt;
+    }
+    return "";
   }
 
   private static Component mm(String template, String server, String player) {

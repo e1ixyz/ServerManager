@@ -1,280 +1,153 @@
 # ServerManager
 
-ServerManager (Velocity plugin)
-===============================
-
-Start/stop backend Paper/Spigot servers on demand from a Velocity proxy.
-
-Highlights
-
-*   Start on first join (designated “primary” server).
-    
-*   Start on “/server ” for any managed server and auto-connect the player when it’s actually ready.
-    
-*   MiniMessage MOTD (two lines; offline/online variants).
-    
-*   Graceful auto-stop when a backend (or the whole proxy) becomes empty.
-    
-*   Optional per-server log files to keep Velocity console clean.
-    
-*   All user-facing messages configurable.
-    
-
-GoalKeep no backend running unless a player is online.
-
-Requirements
-------------
-
-*   Java 17 or newer.
-    
-*   Velocity 3.4.0-SNAPSHOT-534 (or the exact API version you target).
-    
-*   Maven (to build).
-    
-*   Paper/Spigot backends that can be run via a command in their working directory.
-    
-
-Build
------
-
-1.  mvn install:install-file -Dfile=/path/to/velocity-3.4.0-SNAPSHOT-534.jar -DgroupId=com.velocitypowered -DartifactId=velocity-api -Dversion=3.4.0-SNAPSHOT-534 -Dpackaging=jar
-    
-2.  mvn clean package
-    
-
-The shaded artifact will be created at:target/servermanager-\-shaded.jar
-
-Install
--------
-
-1.  Copy the shaded JAR to your Velocity plugins/ folder.
-    
-2.  Start Velocity once to generate the default configuration at:plugins/servermanager/config.yml
-    
-3.  Edit the configuration (see below), then restart Velocity.
-    
-
-Configuration
--------------
-
-File:plugins/servermanager/config.yml
-
-Full example (two servers):
-
-kickMessage: "Server Starting"startupGraceSeconds: 15stopGraceSeconds: 60
-
-motd:offline: "gradient:#ff5555:#ff2222My Network"offline2: "Server Offline - Join to Start"online: "gradient:#22dd55:#11aa44My Network"online2: "Server Online"
-
-messages:startingQueued: "Starting {server}… you’ll be sent when it’s ready."readySending: "{server} is ready — sending you now!"startFailed: "Couldn’t start {server}. Please try again later."timeout: "{server} took too long to start. Try again in a moment."unknownServer: "Unknown server: {server}"
-
-servers:testing:startOnJoin: trueworkingDir: "../servers/testing"startCommand: "java -Xms4096M -Xmx4096M -jar paper-1.21.8-49.jar nogui"stopCommand: "stop"logToFile: truelogFile: "logs/proxy-managed-testing.log"
-
-smp:startOnJoin: falseworkingDir: "../servers/smp"startCommand: "java -Xms2048M -Xmx4096M -jar paper-1.21.8-49.jar nogui"stopCommand: "stop"logToFile: truelogFile: "logs/proxy-managed-smp.log"
-
-Notes
-
-*   workingDir is where the backend process is launched (relative to the Velocity root or absolute).
-    
-*   startCommand runs inside workingDir (include “nogui” if you do not want the GUI).
-    
-*   stopCommand is written to the backend’s stdin (e.g., “stop” for Paper).
-    
-*   logToFile true routes backend stdout/stderr to logFile, keeping Velocity console quieter.
-    
-*   Exactly one server should have startOnJoin: true (this is considered the primary).
-    
-
-Commands and Permissions
-------------------------
-
-Velocity-side commands (aliases):
-
-*   /servermanager
-    
-*   /sm
-    
-
-Subcommands:
-
-*   /sm start — start a managed server if it is offline.
-    
-*   /sm stop — stop a managed server gracefully.
-    
-*   /sm status — list all managed servers and their state.
-    
-
-Suggested permission nodes (assign with LuckPerms or similar):
-
-*   servermanager.command.start
-    
-*   servermanager.command.stop
-    
-*   servermanager.command.status
-    
-*   servermanager.command.\* (umbrella)
-    
-
-Using Velocity’s built-in /server:
-
-*   /server will attempt to connect. If the server is offline but managed by ServerManager:
-    
-    *   The plugin starts it.
-        
-    *   The player sees an in-game “starting …” message.
-        
-    *   The player is automatically connected when a ping confirms the backend is ready.
-        
-    *   If already online, the player connects immediately.
-        
-
-Behavior Details
-----------------
-
-Primary start on first join
-
-*   When the proxy has zero players and the primary backend is offline, the first player to join triggers a start.
-    
-*   The player is immediately kicked with the configurable kickMessage (“Server Starting”) so they can retry from their server list while it boots.
-    
-*   The plugin also arms a proxy-empty stop-all safety timer in case nobody returns.
-    
-
-Accurate MOTD
-
-*   The MOTD (two lines) is MiniMessage-formatted.
-    
-*   It shows the “offline” variant until a successful ping confirms the primary backend is actually ready.
-    
-*   Then it switches to the “online” variant.
-    
-*   Newlines should be expressed in MOTD via two separate lines in config (offline/offline2 or online/online2). You may also use inside the MiniMessage string if desired.
-    
-
-Start on /server with auto-connect
-
-*   Works for any managed server (primary or non-primary).
-    
-*   If the target is offline:
-    
-    *   The plugin starts it and denies the immediate connect.
-        
-    *   The player remains on the proxy, sees a “starting … you’ll be sent when it’s ready” message, and is auto-sent once the server pings successfully.
-        
-    *   Auto-send attempts time out after a configurable period in code (e.g., 90 seconds). On timeout, a configurable message is shown and the backend is stopped if nobody joined.
-        
-*   If the target is online:
-    
-    *   The player connects normally.
-        
-
-Per-server graceful stop
-
-*   When a backend becomes empty, the plugin schedules a stop after stopGraceSeconds.
-    
-*   If someone joins that server again before the timer fires, the pending stop is canceled.
-    
-*   This ensures no backend remains running without players.
-    
-
-Proxy-empty stop-all safety
-
-*   When the entire proxy has zero players, the plugin schedules a stop-all after stopGraceSeconds.
-    
-*   If a server was just started recently, startupGraceSeconds is added once to the delay to avoid an immediate shutdown of a freshly started server.
-    
-*   If someone joins the proxy before the timer fires, the pending stop-all is canceled.
-    
-
-No duplicate “ready” messages
-
-*   The plugin de-duplicates concurrent ping completions so players only see one “server is ready — sending you now” message per request.
-    
-
-MiniMessage Quick Reference
----------------------------
-
-Examples of common tags:
-
-*   Colors: text, text, text, etc.
-    
-*   Styles: , , , , .
-    
-*   Gradient: gradient:#ff5555:#ff2222Your Text.
-    
-*   Newline in MOTD: either use two lines in config (offline/offline2 or online/online2), or include inside the string.
-    
-
-Message placeholders
-
-*   {server}, (server), or are treated the same. They resolve to the server name.
-    
-*   {player}, (player), or resolve to the player’s username.
-    
-*   {state} or is available if you wish to include it in your own custom messages (not required by defaults).
-    
-
-Troubleshooting
----------------
-
-Velocity console shows both proxy and backend logs
-
-*   Enable logToFile: true for each server so their output goes to their own logFile.
-    
-
-MOTD says online too early
-
-*   The plugin marks MOTD “online” only after a successful ping to the primary backend. If you see early flips, ensure the primary server is reachable by Velocity (IP/port, firewall).
-    
-
-“Unknown server” when running /server
-
-*   Ensure the name exists under servers: in config.yml and that Velocity also has a registered server with that exact name.
-    
-
-YAML parsing errors
-
-*   Do not include any “!!class” tags in your YAML. Use only plain keys and values.
-    
-
-Backends do not stop
-
-*   Check stopGraceSeconds, startupGraceSeconds, and whether players remain online on that backend or elsewhere on the proxy.
-    
-*   Verify that stopCommand is correct (“stop” for Paper).
-    
-*   Confirm workingDir and startCommand are correct and that processes are tracked correctly by the OS.
-    
-
-Ports and addresses
-
-*   Ensure each backend’s server.properties uses a port that matches what Velocity expects and that Velocity can reach it (often 127.0.0.1: for local).
-    
-
-Development Notes
------------------
-
-*   Java 17 target; shaded JAR build via Maven.
-    
-*   Dependencies:
-    
-    *   Velocity API (scope provided).
-        
-    *   SnakeYAML (relocated/shaded to avoid proxy conflicts).
-        
-    *   Kyori Adventure MiniMessage.
-        
-*   Main components:
-    
-    *   ServerProcessManager — starts/stops processes, tracks PIDs and recent starts.
-        
-    *   listeners/PlayerEvents — MOTD, start/stop logic, auto-send, queueing and guards.
-        
-    *   Commands — /servermanager and /sm aliases; includes start/stop/status subcommands.
-        
-*   Package name in sources defaults to com.example.soj or your chosen namespace; if you rename, keep package declarations and file paths consistent.
-
-![alt text](https://github.com/e1ixyz/ServerManager/blob/main/img/join.png)
-
-![alt text](https://github.com/e1ixyz/ServerManager/blob/main/img/offline.png)
-
-![alt text](https://github.com/e1ixyz/ServerManager/blob/main/img/online.png)
+ServerManager is a Velocity plugin that keeps your backend Minecraft servers asleep until a player needs them. It starts Paper/Spigot servers on-demand, keeps players informed while they boot, and shuts them down again when everything is idle. The goal is to run zero unused processes without forcing players to manage connections manually.
+
+## Highlights
+- Starts the designated primary backend automatically on the first join and redirects the player with a customizable kick message.
+- Intercepts `/server <name>` (or GUI menu joins) to launch offline managed servers, keeps the player online, queues the connection, and auto-sends once the ping succeeds.
+- Three-state MOTD (offline/starting/online) driven by MiniMessage templates, including a distinct "starting" banner.
+- Graceful per-server shutdowns when a backend empties, plus a safety stop-all when the entire proxy is empty with optional startup grace.
+- Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
+- Fully configurable player-facing messages and permissions-friendly management commands.
+
+## Requirements
+- Java 17+
+- Velocity 3.4.0-SNAPSHOT-534 (or the API version you build against)
+- Maven (for building from source)
+- Paper/Spigot servers that can be launched via command line within their working directory
+
+## Building
+1. Install the Velocity API JAR into your local Maven repo (replace the path if your build uses a different snapshot):
+   ```bash
+   mvn install:install-file \
+     -Dfile=/path/to/velocity-3.4.0-SNAPSHOT-534.jar \
+     -DgroupId=com.velocitypowered \
+     -DartifactId=velocity-api \
+     -Dversion=3.4.0-SNAPSHOT-534 \
+     -Dpackaging=jar
+   ```
+2. Compile and package:
+   ```bash
+   mvn clean package
+   ```
+3. The shaded plugin JAR will be created at `target/servermanager-0.1.0.jar`.
+
+## Installation
+1. Copy the shaded JAR into your Velocity `plugins/` directory.
+2. Start Velocity once; the plugin writes the default configuration to `plugins/servermanager/config.yml`.
+3. Edit the configuration (see below) with your backend details.
+4. Restart Velocity and verify the plugin logs: `ServerManager initialized. Primary: <server>`.
+
+## Configuration
+Default file snippets (generated on first run) are shown below. All MiniMessage strings support the standard placeholder set:
+- `<server>` resolves to the backend name.
+- `<player>` resolves to the player username (where applicable).
+- `<state>` is available for status messages.
+
+```yaml
+kickMessage: "Server Starting"
+startupGraceSeconds: 15
+stopGraceSeconds: 60
+
+motd:
+  offline:  "<gray>Your Network</gray>"
+  offline2: "<red><bold>Server Offline - Join to Start</bold></red>"
+  starting: "<yellow><bold>Server Starting</bold></yellow>"
+  starting2: "<gray>Please wait...</gray>"
+  online:   "<gray>Your Network</gray>"
+  online2:  "<green><bold>Server Online</bold></green>"
+
+messages:
+  noPermission:   "<red>You don't have permission.</red>"
+  usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green> [server]</white>"
+  startingQueued: "<yellow>Starting <white><server></white>… You'll be sent automatically.</yellow>"
+  startFailed:    "<red>Failed to start <white><server></white>. Try again.</red>"
+  readySending:   "<green><white><server></white> is ready. Sending you now…</green>"
+  timeout:        "<red><white><server></white> didn't come up in time.</red>"
+  unknownServer:  "<red>Unknown server <white><server></white>.</red>"
+  started:        "<green>Started <white><server></white>.</green>"
+  alreadyRunning: "<yellow><white><server></white> is already running.</yellow>"
+  stopped:        "<yellow>Stopped <white><server></white>.</yellow>"
+  alreadyStopped: "<gray><white><server></white> is not running.</gray>"
+  statusHeader:   "<gray>Managed servers:</gray>"
+  statusLine:     "<white><server></white>: <state>"
+  stateOnline:    "<green>online</green>"
+  stateOffline:   "<red>offline</red>"
+
+servers:
+  testing:
+    startOnJoin: true
+    workingDir: "../testing-1.21.8"
+    startCommand: "java -Xms4096M -Xmx4096M -jar paper-1.21.8-49.jar nogui"
+    stopCommand: "stop"
+    logToFile: true
+    logFile: "logs/proxy-managed-testing.log"
+
+  creative:
+    startOnJoin: false
+    workingDir: "../creative-1.21.8"
+    startCommand: "java -Xms4096M -Xmx4096M -jar paper-1.21.8-49.jar nogui"
+    stopCommand: "stop"
+    logToFile: true
+    logFile: "logs/proxy-managed-creative.log"
+```
+
+Key points:
+- Exactly one server must have `startOnJoin: true`. That backend becomes the "primary" server shown in the MOTD.
+- `workingDir` is where the start command runs. Relative paths resolve from the Velocity root directory.
+- `startCommand` executes inside `workingDir`. Include `nogui` if you do not want the vanilla GUI.
+- `stopCommand` is written to the server stdin during graceful shutdown (`stop` for Paper).
+- If `logToFile` is true, stdout/stderr is redirected to `logFile`. Paths are resolved relative to `workingDir` when not absolute.
+- `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
+
+## Proxy MOTD States
+The Velocity ping uses the primary server status:
+- **Offline**: primary backend process is not running.
+- **Starting**: process has been launched but has not yet responded to a ping.
+- **Online**: ping succeeded recently (player connections will succeed immediately).
+
+You can style each pair of lines independently. If `starting` or `starting2` is blank, the plugin falls back to the online/offline text in that slot.
+
+## Lifecycle and Auto-Start Flow
+1. Player joins an empty proxy.
+   - Plugin starts the primary server and sends the player a kick containing `kickMessage`.
+   - When the proxy becomes empty again, a stop-all timer is scheduled with `stopGraceSeconds + startupGraceSeconds`.
+2. Player uses `/server <target>` (or a GUI menu) where `<target>` is offline but listed in `servers`.
+   - Plugin launches the backend, denies the immediate connect, and sends `messages.startingQueued`.
+   - A scheduler polls the backend with pings; on success it sends `messages.readySending` and auto-connects the player.
+   - If the backend fails to come up within 90 seconds, the player sees `messages.timeout` and the backend is stopped if nobody reached it.
+3. When a backend becomes empty, the plugin schedules a stop after `stopGraceSeconds`. Any player activity on that server cancels the timer.
+4. When the proxy has zero players, a stop-all is scheduled (with a one-off grace bump if a server just started). Any new player cancels it.
+
+## Commands
+Root command aliases: `/servermanager`, `/sm`
+
+| Subcommand | Permission checks*                         | Description |
+|------------|--------------------------------------------|-------------|
+| `status`   | `servermanager.command.status` (wildcards supported) | Lists each managed server with an online/offline tag and marks the primary. |
+| `start`    | `servermanager.command.start`               | Boots the named managed server if it is offline. |
+| `stop`     | `servermanager.command.stop`                | Sends the graceful stop command to the backend. |
+
+\* Any of `servermanager.command.*`, `servermanager.*`, or legacy `startonjoin.*` nodes also satisfy the checks. Console sources bypass permission checks automatically.
+
+Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for compatibility but delegate to the same logic.
+
+## Logging
+- Velocity logs key lifecycle actions: process starts, stop scheduling, cancellations, timeouts, and migration messages.
+- When `logToFile` is enabled, backend stdout/stderr is piped to the configured file and not echoed to the proxy console.
+
+## Troubleshooting
+- **Config refuses to load**: Ensure `servers:` contains at least one entry and exactly one has `startOnJoin: true`.
+- **MOTD always offline**: Confirm the primary backend is registered with Velocity and reachable; successful pings are required before the MOTD flips to "online".
+- **Player stuck waiting**: Check backend logs for boot errors. If the process starts but never replies to pings, the auto-connect poller will eventually time out.
+- **Backends never stop**: Confirm `stopGraceSeconds` is set, that players actually disconnect, and that the stop command is correct. If you disable `logToFile`, watch the Velocity console for stop warnings.
+
+## Development Notes
+- Package namespace defaults to `com.example.soj`. Rename the package and update build files if you fork.
+- `ServerManagerPlugin` handles lifecycle wiring, configuration migration, and command registration.
+- `ServerProcessManager` and `ManagedServer` encapsulate per-server process control.
+- `PlayerEvents` orchestrates player flow, MOTD updates, start queues, and shutdown scheduling.
+- The project targets Java 17 and shades its dependencies; keep that baseline when contributing.
+
+## License
+MIT (or replace with your preferred license).

@@ -12,6 +12,11 @@ import org.slf4j.Logger;
 import java.io.IOException;
 
 public final class ServerManagerCmd implements SimpleCommand {
+  private static final String[] WILDCARD_PERMS = {
+      "servermanager.command.*",
+      "servermanager.*",
+      "startonjoin.*"
+  };
   private final ServerProcessManager mgr;
   private final Config cfg;
   private final Logger log;
@@ -37,7 +42,7 @@ public final class ServerManagerCmd implements SimpleCommand {
 
     switch (sub) {
       case "status" -> {
-        if (!has(src, "servermanager.status")) { src.sendMessage(mm0(cfg.messages.noPermission)); return; }
+        if (!has(src, "servermanager.command.status", "servermanager.status")) { src.sendMessage(mm0(cfg.messages.noPermission)); return; }
         src.sendMessage(mm0(cfg.messages.statusHeader));
         for (var name : cfg.servers.keySet()) {
           boolean running = mgr.isRunning(name);
@@ -46,7 +51,7 @@ public final class ServerManagerCmd implements SimpleCommand {
         }
       }
       case "start" -> {
-        if (!has(src, "servermanager.start")) { src.sendMessage(mm0(cfg.messages.noPermission)); return; }
+        if (!has(src, "servermanager.command.start", "servermanager.start")) { src.sendMessage(mm0(cfg.messages.noPermission)); return; }
         if (server == null) { src.sendMessage(mm0(cfg.messages.usage)); return; }
         if (!mgr.isKnown(server)) { src.sendMessage(mm2(cfg.messages.unknownServer, server, nameOf(src))); return; }
         if (mgr.isRunning(server)) { src.sendMessage(mm2(cfg.messages.alreadyRunning, server, nameOf(src))); return; }
@@ -59,7 +64,7 @@ public final class ServerManagerCmd implements SimpleCommand {
         }
       }
       case "stop" -> {
-        if (!has(src, "servermanager.stop")) { src.sendMessage(mm0(cfg.messages.noPermission)); return; }
+        if (!has(src, "servermanager.command.stop", "servermanager.stop")) { src.sendMessage(mm0(cfg.messages.noPermission)); return; }
         if (server == null) { src.sendMessage(mm0(cfg.messages.usage)); return; }
         if (!mgr.isKnown(server)) { src.sendMessage(mm2(cfg.messages.unknownServer, server, nameOf(src))); return; }
         if (!mgr.isRunning(server)) { src.sendMessage(mm2(cfg.messages.alreadyStopped, server, nameOf(src))); return; }
@@ -70,8 +75,15 @@ public final class ServerManagerCmd implements SimpleCommand {
     }
   }
 
-  private static boolean has(com.velocitypowered.api.command.CommandSource src, String perm) {
-    return src.hasPermission(perm);
+  private static boolean has(com.velocitypowered.api.command.CommandSource src, String... perms) {
+    if (!(src instanceof Player)) return true; // console and other non-player sources bypass checks
+    for (String perm : perms) {
+      if (perm != null && src.hasPermission(perm)) return true;
+    }
+    for (String wildcard : WILDCARD_PERMS) {
+      if (src.hasPermission(wildcard)) return true;
+    }
+    return false;
   }
 
   private static String nameOf(com.velocitypowered.api.command.CommandSource src) {

@@ -3,6 +3,7 @@ package com.example.soj.commands;
 import com.example.soj.Config;
 import com.example.soj.ServerProcessManager;
 import com.velocitypowered.api.command.SimpleCommand;
+import com.velocitypowered.api.proxy.Player;
 import net.kyori.adventure.text.Component;
 
 public final class StatusCmd implements SimpleCommand {
@@ -29,6 +30,13 @@ public final class StatusCmd implements SimpleCommand {
   }
 
   @Override public boolean hasPermission(Invocation invocation) {
-    return invocation.source().hasPermission("startonjoin.status");
+    var src = invocation.source();
+    if (!(src instanceof Player)) return true;
+    return src.hasPermission("servermanager.command.status")
+        || src.hasPermission("servermanager.command.*")
+        || src.hasPermission("servermanager.status")
+        || src.hasPermission("servermanager.*")
+        || src.hasPermission("startonjoin.status")
+        || src.hasPermission("startonjoin.*");
   }
 }
