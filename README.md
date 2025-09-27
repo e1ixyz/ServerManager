@@ -148,6 +148,3 @@ Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for 
 - `ServerProcessManager` and `ManagedServer` encapsulate per-server process control.
 - `PlayerEvents` orchestrates player flow, MOTD updates, start queues, and shutdown scheduling.
 - The project targets Java 17 and shades its dependencies; keep that baseline when contributing.
-
-## License
-MIT (or replace with your preferred license).
