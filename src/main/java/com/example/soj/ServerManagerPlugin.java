@@ -72,7 +72,7 @@ public final class ServerManagerPlugin {
       }
       if (playerEvents != null) {
         playerEvents.shutdown();
-        proxy.getEventManager().unregisterListener(playerEvents);
+        proxy.getEventManager().unregisterListeners(this);
         playerEvents = null;
       }
       if (processManager != null) {
@@ -107,7 +107,7 @@ public final class ServerManagerPlugin {
       }
       if (playerEvents != null) {
         playerEvents.shutdown();
-        proxy.getEventManager().unregisterListener(playerEvents);
+        proxy.getEventManager().unregisterListeners(this);
         playerEvents = null;
       }
       if (processManager != null) {
