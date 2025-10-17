@@ -34,6 +34,8 @@ public final class ServerManagerPlugin {
   private WhitelistService whitelistService;
   private WhitelistHttpServer whitelistHttpServer;
   private VanillaWhitelistChecker vanillaWhitelist;
+  private PlayerEvents playerEvents;
+  private ServerManagerCmd rootCommand;
 
   @Inject
   public ServerManagerPlugin(ProxyServer proxy, Logger logger, @com.velocitypowered.api.plugin.annotation.DataDirectory Path dataDir) {
@@ -47,21 +49,13 @@ public final class ServerManagerPlugin {
     try {
       if (!Files.exists(dataDir)) Files.createDirectories(dataDir);
       migrateOldConfigIfPresent();
-      this.config = Config.loadOrCreateDefault(dataDir.resolve("config.yml"), logger);
-      this.processManager = new ServerProcessManager(config, logger);
-      this.whitelistService = new WhitelistService(config.whitelist, logger, dataDir);
-      this.vanillaWhitelist = new VanillaWhitelistChecker(config, logger);
-      this.whitelistHttpServer = new WhitelistHttpServer(config.whitelist, logger, whitelistService);
-      this.whitelistHttpServer.start();
-
-      // Listeners
-      proxy.getEventManager().register(this,
-          new PlayerEvents(this, proxy, config, processManager, logger, whitelistService, vanillaWhitelist));
+      initializeRuntime();
 
       // Root command: /servermanager and alias /sm
       var cm = proxy.getCommandManager();
       var meta = cm.metaBuilder("servermanager").aliases("sm").plugin(this).build();
-      cm.register(meta, new ServerManagerCmd(processManager, config, logger));
+      this.rootCommand = new ServerManagerCmd(this, processManager, config, logger);
+      cm.register(meta, rootCommand);
 
       logger.info("ServerManager initialized. Primary: {}", config.primaryServerName());
     } catch (Exception ex) {
@@ -75,6 +69,11 @@ public final class ServerManagerPlugin {
       logger.info("Proxy shutting down; stopping any running managed servers...");
       if (whitelistHttpServer != null) {
         whitelistHttpServer.stop();
+      }
+      if (playerEvents != null) {
+        playerEvents.shutdown();
+        proxy.getEventManager().unregisterListener(playerEvents);
+        playerEvents = null;
       }
       if (processManager != null) {
         processManager.stopAllGracefully();
@@ -96,6 +95,45 @@ public final class ServerManagerPlugin {
       }
     } catch (Exception ex) {
       logger.warn("Could not migrate old config", ex);
+    }
+  }
+
+  public synchronized boolean reload() {
+    logger.info("Reloading ServerManager...");
+    try {
+      if (whitelistHttpServer != null) {
+        whitelistHttpServer.stop();
+        whitelistHttpServer = null;
+      }
+      if (playerEvents != null) {
+        playerEvents.shutdown();
+        proxy.getEventManager().unregisterListener(playerEvents);
+        playerEvents = null;
+      }
+      if (processManager != null) {
+        processManager.stopAllGracefully();
+      }
+
+      initializeRuntime();
+      logger.info("ServerManager reloaded. Primary: {}", config.primaryServerName());
+      return true;
+    } catch (Exception ex) {
+      logger.error("Failed to reload ServerManager", ex);
+      return false;
+    }
+  }
+
+  private void initializeRuntime() throws Exception {
+    this.config = Config.loadOrCreateDefault(dataDir.resolve("config.yml"), logger);
+    this.processManager = new ServerProcessManager(config, logger);
+    this.whitelistService = new WhitelistService(config.whitelist, logger, dataDir);
+    this.vanillaWhitelist = new VanillaWhitelistChecker(config, logger);
+    this.whitelistHttpServer = new WhitelistHttpServer(config.whitelist, logger, whitelistService);
+    this.whitelistHttpServer.start();
+    this.playerEvents = new PlayerEvents(this, proxy, config, processManager, logger, whitelistService, vanillaWhitelist);
+    proxy.getEventManager().register(this, playerEvents);
+    if (rootCommand != null) {
+      rootCommand.updateState(processManager, config);
     }
   }
 }

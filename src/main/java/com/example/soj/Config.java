@@ -36,6 +36,8 @@ public final class Config {
     public String unknownServer  = "<red>Unknown server <white><server></white>.</red>";
     public String noPermission   = "<red>You don’t have permission.</red>";
     public String usage          = "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green> [server]</white>";
+    public String reloadSuccess  = "<green>ServerManager reloaded successfully.</green>";
+    public String reloadFailed   = "<red>Reload failed. Check console for details.</red>";
     public String started        = "<green>Started <white><server></white>.</green>";
     public String alreadyRunning = "<yellow><white><server></white> is already running.</yellow>";
     public String stopped        = "<yellow>Stopped <white><server></white>.</yellow>";
@@ -84,6 +86,8 @@ public final class Config {
           unknownServer:  "<red>Unknown server <white><server></white>.</red>"
           noPermission:   "<red>You don’t have permission.</red>"
           usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green> [server]</white>"
+          reloadSuccess:  "<green>ServerManager reloaded successfully.</green>"
+          reloadFailed:   "<red>Reload failed. Check console for details.</red>"
           started:        "<green>Started <white><server></white>.</green>"
           alreadyRunning: "<yellow><white><server></white> is already running.</yellow>"
           stopped:        "<yellow>Stopped <white><server></white>.</yellow>"

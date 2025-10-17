@@ -1,6 +1,7 @@
 package com.example.soj.commands;
 
 import com.example.soj.Config;
+import com.example.soj.ServerManagerPlugin;
 import com.example.soj.ServerProcessManager;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
@@ -17,23 +18,36 @@ public final class ServerManagerCmd implements SimpleCommand {
       "servermanager.*",
       "startonjoin.*"
   };
-  private final ServerProcessManager mgr;
-  private final Config cfg;
+  private volatile ServerProcessManager mgr;
+  private volatile Config cfg;
   private final Logger log;
+  private final ServerManagerPlugin plugin;
 
-  public ServerManagerCmd(ServerProcessManager mgr, Config cfg, Logger log) {
+  public ServerManagerCmd(ServerManagerPlugin plugin, ServerProcessManager mgr, Config cfg, Logger log) {
+    this.plugin = plugin;
+    this.log = log;
+    updateState(mgr, cfg);
+  }
+
+  public void updateState(ServerProcessManager mgr, Config cfg) {
     this.mgr = mgr;
     this.cfg = cfg;
-    this.log = log;
   }
 
   @Override
   public void execute(Invocation inv) {
     var src = inv.source();
     var args = inv.arguments();
+    ServerProcessManager manager = this.mgr;
+    Config config = this.cfg;
+
+    if (manager == null || config == null) {
+      src.sendMessage(Component.text("ServerManager is not ready."));
+      return;
+    }
 
     if (args.length == 0) {
-      src.sendMessage(mm0(cfg.messages.usage));
+      src.sendMessage(mm0(config.messages.usage));
       return;
     }
 
@@ -42,36 +56,47 @@ public final class ServerManagerCmd implements SimpleCommand {
 
     switch (sub) {
       case "status" -> {
-        if (!has(src, "servermanager.command.status", "servermanager.status")) { src.sendMessage(mm0(cfg.messages.noPermission)); return; }
-        src.sendMessage(mm0(cfg.messages.statusHeader));
-        for (var name : cfg.servers.keySet()) {
-          boolean running = mgr.isRunning(name);
-          String state = running ? cfg.messages.stateOnline : cfg.messages.stateOffline;
-          src.sendMessage(mmState(cfg.messages.statusLine, name, state));
+        if (!has(src, "servermanager.command.status", "servermanager.status")) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        src.sendMessage(mm0(config.messages.statusHeader));
+        for (var name : config.servers.keySet()) {
+          boolean running = manager.isRunning(name);
+          String state = running ? config.messages.stateOnline : config.messages.stateOffline;
+          src.sendMessage(mmState(config.messages.statusLine, name, state));
         }
       }
       case "start" -> {
-        if (!has(src, "servermanager.command.start", "servermanager.start")) { src.sendMessage(mm0(cfg.messages.noPermission)); return; }
-        if (server == null) { src.sendMessage(mm0(cfg.messages.usage)); return; }
-        if (!mgr.isKnown(server)) { src.sendMessage(mm2(cfg.messages.unknownServer, server, nameOf(src))); return; }
-        if (mgr.isRunning(server)) { src.sendMessage(mm2(cfg.messages.alreadyRunning, server, nameOf(src))); return; }
+        if (!has(src, "servermanager.command.start", "servermanager.start")) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        if (server == null) { src.sendMessage(mm0(config.messages.usage)); return; }
+        if (!manager.isKnown(server)) { src.sendMessage(mm2(config.messages.unknownServer, server, nameOf(src))); return; }
+        if (manager.isRunning(server)) { src.sendMessage(mm2(config.messages.alreadyRunning, server, nameOf(src))); return; }
         try {
-          mgr.start(server);
-          src.sendMessage(mm2(cfg.messages.started, server, nameOf(src)));
+          manager.start(server);
+          src.sendMessage(mm2(config.messages.started, server, nameOf(src)));
         } catch (IOException ex) {
           log.error("Failed to start {}", server, ex);
-          src.sendMessage(mm2(cfg.messages.startFailed, server, nameOf(src)));
+          src.sendMessage(mm2(config.messages.startFailed, server, nameOf(src)));
         }
       }
       case "stop" -> {
-        if (!has(src, "servermanager.command.stop", "servermanager.stop")) { src.sendMessage(mm0(cfg.messages.noPermission)); return; }
-        if (server == null) { src.sendMessage(mm0(cfg.messages.usage)); return; }
-        if (!mgr.isKnown(server)) { src.sendMessage(mm2(cfg.messages.unknownServer, server, nameOf(src))); return; }
-        if (!mgr.isRunning(server)) { src.sendMessage(mm2(cfg.messages.alreadyStopped, server, nameOf(src))); return; }
-        mgr.stop(server);
-        src.sendMessage(mm2(cfg.messages.stopped, server, nameOf(src)));
+        if (!has(src, "servermanager.command.stop", "servermanager.stop")) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        if (server == null) { src.sendMessage(mm0(config.messages.usage)); return; }
+        if (!manager.isKnown(server)) { src.sendMessage(mm2(config.messages.unknownServer, server, nameOf(src))); return; }
+        if (!manager.isRunning(server)) { src.sendMessage(mm2(config.messages.alreadyStopped, server, nameOf(src))); return; }
+        manager.stop(server);
+        src.sendMessage(mm2(config.messages.stopped, server, nameOf(src)));
       }
-      default -> src.sendMessage(mm0(cfg.messages.usage));
+      case "reload" -> {
+        if (!has(src, "servermanager.command.reload", "servermanager.reload")) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        Config previous = config;
+        boolean ok = plugin.reload();
+        Config after = this.cfg != null ? this.cfg : previous;
+        Config.Messages messages = after != null ? after.messages : (previous != null ? previous.messages : null);
+        String msg = ok
+            ? (messages != null && messages.reloadSuccess != null ? messages.reloadSuccess : "<green>ServerManager reloaded.</green>")
+            : (messages != null && messages.reloadFailed != null ? messages.reloadFailed : "<red>Reload failed.</red>");
+        src.sendMessage(mm0(msg));
+      }
+      default -> src.sendMessage(mm0(config.messages.usage));
     }
   }
 

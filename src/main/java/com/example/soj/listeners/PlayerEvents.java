@@ -491,4 +491,20 @@ public final class PlayerEvents {
         Placeholder.unparsed("server", server == null ? "" : server),
         Placeholder.unparsed("player", player == null ? "" : player));
   }
+
+  public void shutdown() {
+    ScheduledTask stopAll = pendingStopAll;
+    if (stopAll != null) {
+      stopAll.cancel();
+      pendingStopAll = null;
+    }
+    pendingServerStop.values().forEach(ScheduledTask::cancel);
+    pendingServerStop.clear();
+    pendingConnect.values().forEach(ScheduledTask::cancel);
+    pendingConnect.clear();
+    pendingConnectStartMs.clear();
+    waitingTarget.clear();
+    readyNotifyOnce.clear();
+    heartbeatTask.cancel();
+  }
 }
