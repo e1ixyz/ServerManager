@@ -437,12 +437,16 @@ public final class PlayerEvents {
     if (whitelist == null || !whitelist.enabled()) return true;
     UUID uuid = player.getUniqueId();
     String name = player.getUsername();
-    if (whitelist.isWhitelisted(uuid, name)) return true;
+    if (whitelist.isWhitelisted(uuid, name)) {
+      mirrorToVanilla(uuid, name);
+      return true;
+    }
     if (whitelistCfg != null && whitelistCfg.allowVanillaBypass
         && vanillaWhitelist != null && vanillaWhitelist.hasTargets()
         && vanillaWhitelist.isWhitelisted(uuid, name)) {
       try {
         whitelist.add(uuid, name);
+        mirrorToVanilla(uuid, name);
       } catch (IOException ex) {
         log.warn("Failed to mirror vanilla whitelist entry for {}", name, ex);
       }
@@ -458,6 +462,11 @@ public final class PlayerEvents {
       base = "http://" + whitelistCfg.bind + ":" + whitelistCfg.port;
     }
     return base;
+  }
+
+  private void mirrorToVanilla(UUID uuid, String name) {
+    if (vanillaWhitelist == null) return;
+    vanillaWhitelist.ensureWhitelisted(uuid, name);
   }
 
   private static String normalizePlaceholders(String s) {

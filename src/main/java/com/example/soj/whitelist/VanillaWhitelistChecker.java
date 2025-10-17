@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Objects;
 
 /**
  * Reads vanilla whitelist.json files from the managed backend servers
@@ -35,6 +36,7 @@ public final class VanillaWhitelistChecker {
   private final Map<Path, Cache> cache = new ConcurrentHashMap<>();
 
   private record Cache(long lastModified, Set<UUID> uuids, Set<String> namesWithoutUuid) {}
+  private record Entry(UUID uuid, String name) {}
 
   public VanillaWhitelistChecker(Config cfg, Logger log) {
     this.log = log;
@@ -60,6 +62,20 @@ public final class VanillaWhitelistChecker {
     return false;
   }
 
+  public void ensureWhitelisted(UUID uuid, String username) {
+    if (uuid == null || files.isEmpty()) return;
+    String name = username == null ? "" : username.trim();
+    for (Path path : files) {
+      try {
+        if (updateFile(path, uuid, name)) {
+          cache.remove(path);
+        }
+      } catch (IOException ex) {
+        log.warn("Failed to update vanilla whitelist {}", path.toString().replace('\\','/'), ex);
+      }
+    }
+  }
+
   private Cache loadIfNeeded(Path file, Cache existing) {
     try {
       if (!Files.exists(file)) return existing;
@@ -72,18 +88,9 @@ public final class VanillaWhitelistChecker {
       Object parsed = yaml.load(raw);
       Set<UUID> uuids = new HashSet<>();
       Set<String> namesWithoutUuid = new HashSet<>();
-      if (parsed instanceof Iterable<?> iterable) {
-        for (Object obj : iterable) {
-          if (obj instanceof Map<?, ?> map) {
-            UUID uuid = parseUuid(map.get("uuid"));
-            String name = stringOrNull(map.get("name"));
-            if (uuid != null) {
-              uuids.add(uuid);
-            } else if (name != null && !name.isBlank()) {
-              namesWithoutUuid.add(name.toLowerCase(Locale.ROOT));
-            }
-          }
-        }
+      for (Entry entry : readEntries(parsed)) {
+        if (entry.uuid() != null) uuids.add(entry.uuid());
+        else if (entry.name() != null) namesWithoutUuid.add(entry.name().toLowerCase(Locale.ROOT));
       }
       return new Cache(lastModified, uuids, namesWithoutUuid);
     } catch (IOException ex) {
@@ -103,6 +110,80 @@ public final class VanillaWhitelistChecker {
     return new ArrayList<>(unique);
   }
 
+  private boolean updateFile(Path file, UUID uuid, String username) throws IOException {
+    List<Entry> entries = new ArrayList<>(readEntries(file));
+    boolean changed = false;
+    boolean exists = entries.stream().anyMatch(e -> uuid.equals(e.uuid()));
+    if (!exists) {
+      entries.add(new Entry(uuid, username.isBlank() ? null : username));
+      changed = true;
+    } else if (username != null && !username.isBlank()) {
+      boolean updated = false;
+      for (int i = 0; i < entries.size(); i++) {
+        Entry e = entries.get(i);
+        if (uuid.equals(e.uuid()) && !Objects.equals(e.name(), username)) {
+          entries.set(i, new Entry(uuid, username));
+          updated = true;
+        }
+      }
+      changed = updated;
+    }
+    if (changed) {
+      writeEntries(file, entries);
+    }
+    return changed;
+  }
+
+  private List<Entry> readEntries(Path file) throws IOException {
+    List<Entry> entries = new ArrayList<>();
+    if (!Files.exists(file)) {
+      return entries;
+    }
+    String raw = Files.readString(file, StandardCharsets.UTF_8);
+    Object parsed = yaml.load(raw);
+    entries.addAll(readEntries(parsed));
+    return entries;
+  }
+
+  private List<Entry> readEntries(Object parsed) {
+    List<Entry> entries = new ArrayList<>();
+    if (parsed instanceof Iterable<?> iterable) {
+      for (Object obj : iterable) {
+        if (!(obj instanceof Map<?, ?> map)) continue;
+        UUID uuid = parseUuid(map.get("uuid"));
+        String name = stringOrNull(map.get("name"));
+        entries.add(new Entry(uuid, name));
+      }
+    }
+    return entries;
+  }
+
+  private void writeEntries(Path file, List<Entry> entries) throws IOException {
+    Files.createDirectories(file.getParent());
+    StringBuilder sb = new StringBuilder();
+    sb.append("[\n");
+    for (int i = 0; i < entries.size(); i++) {
+      Entry e = entries.get(i);
+      sb.append("  {");
+      if (e.uuid() != null) {
+        sb.append("\"uuid\": \"").append(e.uuid()).append('"');
+      } else {
+        sb.append("\"uuid\": null");
+      }
+      sb.append(", \"name\": ");
+      if (e.name() != null) {
+        sb.append('"').append(escapeJson(e.name())).append('"');
+      } else {
+        sb.append("null");
+      }
+      sb.append('}');
+      if (i + 1 < entries.size()) sb.append(',');
+      sb.append('\n');
+    }
+    sb.append("]\n");
+    Files.writeString(file, sb.toString(), StandardCharsets.UTF_8);
+  }
+
   private UUID parseUuid(Object raw) {
     if (raw == null) return null;
     try {
@@ -116,5 +197,9 @@ public final class VanillaWhitelistChecker {
     if (raw == null) return null;
     String s = raw.toString();
     return s.isBlank() ? null : s;
+  }
+
+  private String escapeJson(String s) {
+    return s.replace("\\", "\\\\").replace("\"", "\\\"");
   }
 }

@@ -12,6 +12,7 @@ com/example/soj/whitelist/VanillaWhitelistChecker.class
 com/example/soj/Config$Motd.class
 com/example/soj/Config$Messages.class
 com/example/soj/commands/StartCmd.class
+com/example/soj/whitelist/VanillaWhitelistChecker$Entry.class
 com/example/soj/whitelist/WhitelistService$PendingCode.class
 com/example/soj/ServerProcessManager.class
 com/example/soj/commands/ServerManagerCmd.class
