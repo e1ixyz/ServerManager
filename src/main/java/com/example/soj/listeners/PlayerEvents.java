@@ -467,6 +467,13 @@ public final class PlayerEvents {
   private void mirrorToVanilla(UUID uuid, String name) {
     if (vanillaWhitelist == null) return;
     vanillaWhitelist.ensureWhitelisted(uuid, name);
+    String primary = mgr.primary();
+    if (primary == null || name == null || name.isBlank()) return;
+    if (!mgr.isRunning(primary)) return;
+    String cmd = "whitelist add " + name;
+    if (!mgr.sendCommand(primary, cmd)) {
+      log.warn("Failed to dispatch '{}' to {} after whitelist sync", cmd, primary);
+    }
   }
 
   private static String normalizePlaceholders(String s) {

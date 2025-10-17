@@ -107,14 +107,12 @@ public final class ServerManagerPlugin {
       }
       if (playerEvents != null) {
         playerEvents.shutdown();
-        proxy.getEventManager().unregisterListeners(this);
         playerEvents = null;
       }
-      if (processManager != null) {
-        processManager.stopAllGracefully();
-      }
+      proxy.getEventManager().unregisterListeners(this);
 
-      initializeRuntime();
+      Config newConfig = Config.loadOrCreateDefault(dataDir.resolve("config.yml"), logger);
+      initializeRuntime(newConfig);
       logger.info("ServerManager reloaded. Primary: {}", config.primaryServerName());
       return true;
     } catch (Exception ex) {
@@ -124,16 +122,25 @@ public final class ServerManagerPlugin {
   }
 
   private void initializeRuntime() throws Exception {
-    this.config = Config.loadOrCreateDefault(dataDir.resolve("config.yml"), logger);
-    this.processManager = new ServerProcessManager(config, logger);
-    this.whitelistService = new WhitelistService(config.whitelist, logger, dataDir);
-    this.vanillaWhitelist = new VanillaWhitelistChecker(config, logger);
-    this.whitelistHttpServer = new WhitelistHttpServer(config.whitelist, logger, whitelistService);
+    Config newConfig = Config.loadOrCreateDefault(dataDir.resolve("config.yml"), logger);
+    initializeRuntime(newConfig);
+  }
+
+  private void initializeRuntime(Config newConfig) throws Exception {
+    if (processManager == null) {
+      processManager = new ServerProcessManager(newConfig, logger);
+    } else {
+      processManager.reload(newConfig);
+    }
+    this.config = newConfig;
+    this.whitelistService = new WhitelistService(newConfig.whitelist, logger, dataDir);
+    this.vanillaWhitelist = new VanillaWhitelistChecker(newConfig, logger);
+    this.whitelistHttpServer = new WhitelistHttpServer(newConfig.whitelist, logger, whitelistService);
     this.whitelistHttpServer.start();
-    this.playerEvents = new PlayerEvents(this, proxy, config, processManager, logger, whitelistService, vanillaWhitelist);
+    this.playerEvents = new PlayerEvents(this, proxy, newConfig, processManager, logger, whitelistService, vanillaWhitelist);
     proxy.getEventManager().register(this, playerEvents);
     if (rootCommand != null) {
-      rootCommand.updateState(processManager, config);
+      rootCommand.updateState(processManager, newConfig);
     }
   }
 }

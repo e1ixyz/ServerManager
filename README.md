@@ -160,13 +160,13 @@ Root command aliases: `/servermanager`, `/sm`
 | `status`   | `servermanager.command.status` (wildcards supported) | Lists each managed server with an online/offline tag and marks the primary. |
 | `start`    | `servermanager.command.start`               | Boots the named managed server if it is offline. |
 | `stop`     | `servermanager.command.stop`                | Sends the graceful stop command to the backend. |
-| `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and stops all managed backends. |
+| `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
 
 \* Any of `servermanager.command.*`, `servermanager.*`, or legacy `startonjoin.*` nodes also satisfy the checks. Console sources bypass permission checks automatically.
 
 Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for compatibility but delegate to the same logic.
 
-`/sm reload` restarts the plugin runtime, including stopping every managed backend before reloading configuration and whitelist services. Plan to run it during maintenance windows.
+`/sm reload` refreshes the plugin runtime and whitelist services without interrupting running managed servers. Only servers removed from the configuration are stopped during the reload.
 
 ## Logging
 - Velocity logs key lifecycle actions: process starts, stop scheduling, cancellations, timeouts, and migration messages.
