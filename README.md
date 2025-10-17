@@ -116,11 +116,11 @@ Key points:
 - If `logToFile` is true, stdout/stderr is redirected to `logFile`. Paths are resolved relative to `workingDir` when not absolute.
 - `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
 - Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a short URL and one-time code and can redeem it through the built-in HTTP form.
-- `allowVanillaBypass: true` mirrors any UUID found in backend `whitelist.json` files into the network whitelist the next time that player connects. Set it to `false` if you want the network whitelist to be completely independent.
+- `allowVanillaBypass: true` mirrors any UUID found in the primary backend's `whitelist.json` file into the network whitelist the next time that player connects. Set it to `false` if you want the network whitelist to be completely independent.
 
 ## Network Whitelist Flow
 1. Player joins Velocity.
-2. If their UUID or username exists in `network-whitelist.yml`, or (optionally) in a backend `whitelist.json`, they proceed normally.
+2. If their UUID or username exists in `network-whitelist.yml`, or (optionally) in the primary backend's `whitelist.json`, they proceed normally.
 3. Otherwise the plugin:
    - Issues a short numeric code and stores it in-memory for that UUID.
    - Disconnects the player with the configured `kickMessage`, replacing `<url>` and `<code>`.

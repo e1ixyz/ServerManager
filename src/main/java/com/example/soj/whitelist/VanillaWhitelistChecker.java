@@ -100,14 +100,13 @@ public final class VanillaWhitelistChecker {
   }
 
   private List<Path> discoverWhitelistFiles(Config cfg) {
-    Set<Path> unique = new LinkedHashSet<>();
-    for (ServerConfig sc : cfg.servers.values()) {
-      if (sc.workingDir == null || sc.workingDir.isBlank()) continue;
-      Path dir = Paths.get(sc.workingDir).normalize();
-      Path file = dir.resolve(VANILLA_FILE);
-      unique.add(file);
-    }
-    return new ArrayList<>(unique);
+    String primary = cfg.primaryServerName();
+    if (primary == null) return List.of();
+    ServerConfig sc = cfg.servers.get(primary);
+    if (sc == null || sc.workingDir == null || sc.workingDir.isBlank()) return List.of();
+    Path dir = Paths.get(sc.workingDir).normalize();
+    Path file = dir.resolve(VANILLA_FILE);
+    return List.of(file);
   }
 
   private boolean updateFile(Path file, UUID uuid, String username) throws IOException {
