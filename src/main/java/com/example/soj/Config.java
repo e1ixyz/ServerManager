@@ -17,6 +17,7 @@ public final class Config {
   public Motd motd = new Motd();
   public Map<String, ServerConfig> servers = new LinkedHashMap<>();
   public Messages messages = new Messages();
+  public Whitelist whitelist = new Whitelist();
 
   public static final class Motd {
     public String offline  = "<gray>eli server :3</gray>";
@@ -43,6 +44,23 @@ public final class Config {
     public String statusLine     = "<white><server></white>: <state>";
     public String stateOnline    = "<green>online</green>";
     public String stateOffline   = "<red>offline</red>";
+  }
+
+  public static final class Whitelist {
+    public boolean enabled = false;
+    public String bind = "0.0.0.0";
+    public int port = 8081;
+    public String baseUrl = "http://127.0.0.1:8081";
+    public String kickMessage = "You are not whitelisted. Visit <url> and enter your username and code <code>.";
+    public int codeLength = 6;
+    public int codeTtlSeconds = 900;
+    public String dataFile = "network-whitelist.yml";
+    public boolean allowVanillaBypass = true;
+    public String pageTitle = "Network Access";
+    public String pageSubtitle = "Enter the code shown in-game to whitelist your account.";
+    public String successMessage = "Success! You are now whitelisted. You may rejoin the server.";
+    public String failureMessage = "Invalid or expired code. Please try again from in-game.";
+    public String buttonText = "Verify & Whitelist";
   }
 
   public static Config loadOrCreateDefault(Path path, Logger log) throws Exception {
@@ -82,6 +100,21 @@ public final class Config {
             stopCommand: "stop"
             logToFile: true
             logFile: "logs/proxy-managed-testing.log"
+        whitelist:
+          enabled: false
+          bind: "0.0.0.0"
+          port: 8081
+          baseUrl: "http://127.0.0.1:8081"
+          kickMessage: "You are not whitelisted. Visit <url> and enter your username and code <code>."
+          codeLength: 6
+          codeTtlSeconds: 900
+          dataFile: "network-whitelist.yml"
+          allowVanillaBypass: true
+          pageTitle: "Network Access"
+          pageSubtitle: "Enter the code shown in-game to whitelist your account."
+          successMessage: "Success! You are now whitelisted. You may rejoin the server."
+          failureMessage: "Invalid or expired code. Please try again from in-game."
+          buttonText: "Verify & Whitelist"
         """;
       Files.createDirectories(path.getParent());
       Files.writeString(path, defaultYaml, StandardCharsets.UTF_8);
@@ -111,9 +144,12 @@ public final class Config {
 
     if (cfg.motd == null) cfg.motd = new Motd();
     if (cfg.messages == null) cfg.messages = new Messages();
+    if (cfg.whitelist == null) cfg.whitelist = new Whitelist();
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;
     if (cfg.stopGraceSeconds < 0) cfg.stopGraceSeconds = 0;
+    if (cfg.whitelist.codeLength < 4) cfg.whitelist.codeLength = 4;
+    if (cfg.whitelist.codeTtlSeconds < 60) cfg.whitelist.codeTtlSeconds = 60;
 
     return cfg;
   }

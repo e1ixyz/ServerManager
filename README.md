@@ -8,7 +8,7 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
 - Three-state MOTD (offline/starting/online) driven by MiniMessage templates, including a distinct "starting" banner.
 - Graceful per-server shutdowns when a backend empties, plus a safety stop-all when the entire proxy is empty with optional startup grace.
 - Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
-- Fully configurable player-facing messages and permissions-friendly management commands.
+- Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve web onboarding.
 
 ## Requirements
 - Java 17+
@@ -90,6 +90,22 @@ servers:
     stopCommand: "stop"
     logToFile: true
     logFile: "logs/proxy-managed-creative.log"
+
+whitelist:
+  enabled: true
+  bind: "0.0.0.0"
+  port: 8081
+  baseUrl: "https://play.example.com/whitelist"
+  kickMessage: "You are not whitelisted. Visit <url> and enter your username and code <code>."
+  codeLength: 6
+  codeTtlSeconds: 900
+  dataFile: "network-whitelist.yml"
+  allowVanillaBypass: true
+  pageTitle: "Network Access"
+  pageSubtitle: "Enter the code shown in-game to whitelist your account."
+  successMessage: "Success! You are now whitelisted. You may rejoin the server."
+  failureMessage: "Invalid or expired code. Please try again from in-game."
+  buttonText: "Verify & Whitelist"
 ```
 
 Key points:
@@ -99,6 +115,23 @@ Key points:
 - `stopCommand` is written to the server stdin during graceful shutdown (`stop` for Paper).
 - If `logToFile` is true, stdout/stderr is redirected to `logFile`. Paths are resolved relative to `workingDir` when not absolute.
 - `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
+- Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a short URL and one-time code and can redeem it through the built-in HTTP form.
+- `allowVanillaBypass: true` mirrors any UUID found in backend `whitelist.json` files into the network whitelist the next time that player connects. Set it to `false` if you want the network whitelist to be completely independent.
+
+## Network Whitelist Flow
+1. Player joins Velocity.
+2. If their UUID or username exists in `network-whitelist.yml`, or (optionally) in a backend `whitelist.json`, they proceed normally.
+3. Otherwise the plugin:
+   - Issues a short numeric code and stores it in-memory for that UUID.
+   - Disconnects the player with the configured `kickMessage`, replacing `<url>` and `<code>`.
+   - Keeps backend servers off until the player is verified (avoiding accidental auto-starts).
+4. The player visits the web form served by the embedded HTTP server (reachable at `baseUrl`).
+5. After entering their in-game name and code, the plugin validates the submission, writes the entry to `network-whitelist.yml`, and shows a success message instructing them to reconnect.
+
+Notes:
+- `bind` / `port` define the listen address. Use a reverse proxy (or change `baseUrl`) to expose the form over HTTPS.
+- Codes expire after `codeTtlSeconds` and are one-time. Requesting a new code replaces the old one.
+- `network-whitelist.yml` is written atomically and can be edited manually while Velocity is offline if needed.
 
 ## Proxy MOTD States
 The Velocity ping uses the primary server status:

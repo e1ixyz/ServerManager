@@ -4,9 +4,16 @@ com/example/soj/commands/StopCmd.class
 com/example/soj/listeners/PlayerEvents.class
 com/example/soj/commands/StatusCmd.class
 com/example/soj/ManagedServer.class
+com/example/soj/Config$Whitelist.class
+com/example/soj/whitelist/WhitelistHttpServer.class
 com/example/soj/ServerManagerPlugin.class
+com/example/soj/whitelist/VanillaWhitelistChecker$Cache.class
+com/example/soj/whitelist/VanillaWhitelistChecker.class
 com/example/soj/Config$Motd.class
 com/example/soj/Config$Messages.class
 com/example/soj/commands/StartCmd.class
+com/example/soj/whitelist/WhitelistService$PendingCode.class
 com/example/soj/ServerProcessManager.class
 com/example/soj/commands/ServerManagerCmd.class
+com/example/soj/whitelist/WhitelistService.class
+com/example/soj/whitelist/WhitelistService$Entry.class

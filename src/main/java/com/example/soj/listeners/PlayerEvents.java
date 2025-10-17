@@ -2,6 +2,8 @@ package com.example.soj.listeners;
 
 import com.example.soj.Config;
 import com.example.soj.ServerProcessManager;
+import com.example.soj.whitelist.VanillaWhitelistChecker;
+import com.example.soj.whitelist.WhitelistService;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.LoginEvent;
@@ -42,6 +44,9 @@ public final class PlayerEvents {
   private final Config cfg;
   private final ServerProcessManager mgr;
   private final Logger log;
+  private final WhitelistService whitelist;
+  private final VanillaWhitelistChecker vanillaWhitelist;
+  private final Config.Whitelist whitelistCfg;
 
   /** Proxy-empty stop-all task */
   private volatile ScheduledTask pendingStopAll;
@@ -62,12 +67,23 @@ public final class PlayerEvents {
   @SuppressWarnings("FieldCanBeLocal")
   private final ScheduledTask heartbeatTask;
 
-  public PlayerEvents(Object pluginOwner, ProxyServer proxy, Config cfg, ServerProcessManager mgr, Logger log) {
+  public PlayerEvents(
+      Object pluginOwner,
+      ProxyServer proxy,
+      Config cfg,
+      ServerProcessManager mgr,
+      Logger log,
+      WhitelistService whitelist,
+      VanillaWhitelistChecker vanillaWhitelist
+  ) {
     this.pluginOwner = pluginOwner;
     this.proxy = proxy;
     this.cfg = cfg;
     this.mgr = mgr;
     this.log = log;
+    this.whitelist = whitelist;
+    this.vanillaWhitelist = vanillaWhitelist;
+    this.whitelistCfg = (whitelist != null) ? whitelist.config() : null;
 
     // Periodically ping all known servers to update readiness (for accurate MOTD)
     this.heartbeatTask = proxy.getScheduler().buildTask(pluginOwner, () -> {
@@ -119,12 +135,25 @@ public final class PlayerEvents {
   @Subscribe
   public void onLogin(LoginEvent e) {
     cancelPendingStopAll(); // activity on proxy
-    cancelPendingConnect(e.getPlayer().getUniqueId()); // clear any previous wait
+    Player joining = e.getPlayer();
+    cancelPendingConnect(joining.getUniqueId()); // clear any previous wait
+
+    if (!hasNetworkAccess(joining)) {
+      if (whitelist != null) {
+        var pc = whitelist.issueCode(joining.getUniqueId(), joining.getUsername());
+        String url = buildWhitelistUrl(pc.code(), joining.getUsername());
+        String msg = whitelist.kickMessage(url, pc.code());
+        log.info("Denied {} login (not on network whitelist). Issued code {}", joining.getUsername(), pc.code());
+        e.setResult(LoginEvent.ComponentResult.denied(Component.text(msg)));
+      } else {
+        e.setResult(LoginEvent.ComponentResult.denied(Component.text("You are not permitted to join right now.")));
+      }
+      return;
+    }
 
     String primary = cfg.primaryServerName();
     if (primary == null) return;
 
-    Player joining = e.getPlayer();
     if (proxy.getAllPlayers().isEmpty() && !mgr.isRunning(primary)) {
       try {
         log.info("First join detected by {} -> starting primary [{}]", joining.getUsername(), primary);
@@ -402,6 +431,33 @@ public final class PlayerEvents {
       if (cs.getServerInfo().getName().equals(serverName)) c[0]++;
     }));
     return c[0];
+  }
+
+  private boolean hasNetworkAccess(Player player) {
+    if (whitelist == null || !whitelist.enabled()) return true;
+    UUID uuid = player.getUniqueId();
+    String name = player.getUsername();
+    if (whitelist.isWhitelisted(uuid, name)) return true;
+    if (whitelistCfg != null && whitelistCfg.allowVanillaBypass
+        && vanillaWhitelist != null && vanillaWhitelist.hasTargets()
+        && vanillaWhitelist.isWhitelisted(uuid, name)) {
+      try {
+        whitelist.add(uuid, name);
+      } catch (IOException ex) {
+        log.warn("Failed to mirror vanilla whitelist entry for {}", name, ex);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  private String buildWhitelistUrl(String code, String username) {
+    if (whitelistCfg == null) return "";
+    String base = whitelistCfg.baseUrl;
+    if (base == null || base.isBlank()) {
+      base = "http://" + whitelistCfg.bind + ":" + whitelistCfg.port;
+    }
+    return base;
   }
 
   private static String normalizePlaceholders(String s) {

@@ -2,6 +2,9 @@ package com.example.soj;
 
 import com.example.soj.listeners.PlayerEvents;
 import com.example.soj.commands.ServerManagerCmd;
+import com.example.soj.whitelist.WhitelistHttpServer;
+import com.example.soj.whitelist.WhitelistService;
+import com.example.soj.whitelist.VanillaWhitelistChecker;
 import com.google.inject.Inject;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
@@ -18,7 +21,7 @@ import java.nio.file.StandardCopyOption;
   id = "servermanager",
   name = "ServerManager",
   version = "0.1.0",
-  authors = {"you"}
+  authors = {"e1ixyz"}
 )
 public final class ServerManagerPlugin {
 
@@ -28,6 +31,9 @@ public final class ServerManagerPlugin {
 
   private Config config;
   private ServerProcessManager processManager;
+  private WhitelistService whitelistService;
+  private WhitelistHttpServer whitelistHttpServer;
+  private VanillaWhitelistChecker vanillaWhitelist;
 
   @Inject
   public ServerManagerPlugin(ProxyServer proxy, Logger logger, @com.velocitypowered.api.plugin.annotation.DataDirectory Path dataDir) {
@@ -43,9 +49,14 @@ public final class ServerManagerPlugin {
       migrateOldConfigIfPresent();
       this.config = Config.loadOrCreateDefault(dataDir.resolve("config.yml"), logger);
       this.processManager = new ServerProcessManager(config, logger);
+      this.whitelistService = new WhitelistService(config.whitelist, logger, dataDir);
+      this.vanillaWhitelist = new VanillaWhitelistChecker(config, logger);
+      this.whitelistHttpServer = new WhitelistHttpServer(config.whitelist, logger, whitelistService);
+      this.whitelistHttpServer.start();
 
       // Listeners
-      proxy.getEventManager().register(this, new PlayerEvents(this, proxy, config, processManager, logger));
+      proxy.getEventManager().register(this,
+          new PlayerEvents(this, proxy, config, processManager, logger, whitelistService, vanillaWhitelist));
 
       // Root command: /servermanager and alias /sm
       var cm = proxy.getCommandManager();
@@ -62,6 +73,9 @@ public final class ServerManagerPlugin {
   public void onShutdown(ProxyShutdownEvent e) {
     try {
       logger.info("Proxy shutting down; stopping any running managed servers...");
+      if (whitelistHttpServer != null) {
+        whitelistHttpServer.stop();
+      }
       if (processManager != null) {
         processManager.stopAllGracefully();
       }
