@@ -139,15 +139,8 @@ public final class PlayerEvents {
     cancelPendingConnect(joining.getUniqueId()); // clear any previous wait
 
     if (!hasNetworkAccess(joining)) {
-      if (whitelist != null) {
-        var pc = whitelist.issueCode(joining.getUniqueId(), joining.getUsername());
-        String url = buildWhitelistUrl(pc.code(), joining.getUsername());
-        String msg = whitelist.kickMessage(url, pc.code());
-        log.info("Denied {} login (not on network whitelist). Issued code {}", joining.getUsername(), pc.code());
-        e.setResult(LoginEvent.ComponentResult.denied(Component.text(msg)));
-      } else {
-        e.setResult(LoginEvent.ComponentResult.denied(Component.text("You are not permitted to join right now.")));
-      }
+      handleNotWhitelisted(joining, true);
+      e.setResult(LoginEvent.ComponentResult.denied(Component.empty()));
       return;
     }
 
@@ -192,6 +185,20 @@ public final class PlayerEvents {
       event.getPlayer().disconnect(Component.text(cfg.kickMessage));
       // Proxy will be empty after disconnect; ensure stop-all timer is armed
       scheduleStopAllIfProxyEmpty();
+      return;
+    }
+
+    Player player = event.getPlayer();
+
+    if (!target.equals(primary) && whitelistEnabled()) {
+      if (!hasNetworkAccess(player)) {
+        handleNotWhitelisted(player, true);
+        event.setResult(ServerPreConnectEvent.ServerResult.denied());
+        return;
+      }
+    } else if (!whitelistEnabled() && !hasNetworkAccess(player)) {
+      handleNotWhitelisted(player, true);
+      event.setResult(ServerPreConnectEvent.ServerResult.denied());
       return;
     }
 
@@ -434,7 +441,7 @@ public final class PlayerEvents {
   }
 
   private boolean hasNetworkAccess(Player player) {
-    if (whitelist == null || !whitelist.enabled()) return true;
+    if (!whitelistEnabled()) return true;
     UUID uuid = player.getUniqueId();
     String name = player.getUsername();
     if (whitelist.isWhitelisted(uuid, name)) {
@@ -455,13 +462,35 @@ public final class PlayerEvents {
     return false;
   }
 
+  private void handleNotWhitelisted(Player player, boolean disconnect) {
+    Component msg;
+    if (whitelist != null && whitelist.enabled()) {
+      var pc = whitelist.issueCode(player.getUniqueId(), player.getUsername());
+      String url = buildWhitelistUrl(pc.code(), player.getUsername());
+      String text = whitelist.kickMessage(url, pc.code());
+      msg = Component.text(text);
+      log.info("Denied {} (not on network whitelist). Issued code {}", player.getUsername(), pc.code());
+    } else {
+      msg = Component.text("You are not permitted to join right now.");
+    }
+    if (disconnect) {
+      player.disconnect(msg);
+    } else {
+      player.sendMessage(msg);
+    }
+  }
+
   private String buildWhitelistUrl(String code, String username) {
-    if (whitelistCfg == null) return "";
+    if (!whitelistEnabled()) return "";
     String base = whitelistCfg.baseUrl;
     if (base == null || base.isBlank()) {
       base = "http://" + whitelistCfg.bind + ":" + whitelistCfg.port;
     }
     return base;
+  }
+
+  private boolean whitelistEnabled() {
+    return whitelist != null && whitelist.enabled();
   }
 
   private void mirrorToVanilla(UUID uuid, String name) {
