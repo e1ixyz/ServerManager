@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -22,8 +23,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Reads vanilla whitelist.json files from the managed backend servers
- * (if present) so players already whitelisted there bypass the network gate.
+ * Reads vanilla whitelist.json files from managed backends. The primary server
+ * can be mirrored into the network whitelist, while auxiliary servers are
+ * queried to enforce their own access lists.
  */
 public final class VanillaWhitelistChecker {
 
@@ -31,48 +33,78 @@ public final class VanillaWhitelistChecker {
 
   private final Logger log;
   private final Yaml yaml = new Yaml();
-  private final List<Path> files;
+  private final Map<String, Path> serverFiles = new HashMap<>();
   private final Map<Path, Cache> cache = new ConcurrentHashMap<>();
+  private final String primaryName;
 
   private record Cache(long lastModified, Set<UUID> uuids, Set<String> namesWithoutUuid) {}
   private record Entry(UUID uuid, String name) {}
 
   public VanillaWhitelistChecker(Config cfg, Logger log) {
     this.log = log;
-    this.files = discoverWhitelistFiles(cfg);
-    if (!files.isEmpty()) {
-      log.info("Vanilla whitelist bypass monitoring {} file(s).", files.size());
+    this.primaryName = cfg.primaryServerName();
+
+    for (var entry : cfg.servers.entrySet()) {
+      ServerConfig sc = entry.getValue();
+      if (sc.workingDir == null || sc.workingDir.isBlank()) continue;
+      Path file = Paths.get(sc.workingDir)
+          .resolve(VANILLA_FILE)
+          .toAbsolutePath()
+          .normalize();
+      serverFiles.put(entry.getKey(), file);
+    }
+
+    Path primaryPath = primaryPath();
+    if (primaryPath != null) {
+      log.info("Primary whitelist file: {}", primaryPath.toString().replace('\\','/'));
     }
   }
 
   public boolean hasTargets() {
-    return !files.isEmpty();
+    return primaryPath() != null;
   }
 
+  /** Networks bypass uses the primary backend only. */
   public boolean isWhitelisted(UUID uuid, String username) {
-    if (files.isEmpty()) return false;
-    String lower = username == null ? null : username.toLowerCase(Locale.ROOT);
-    for (Path path : files) {
-      Cache c = cache.compute(path, (p, existing) -> loadIfNeeded(p, existing));
-      if (c == null) continue;
-      if (uuid != null && c.uuids.contains(uuid)) return true;
-      if (lower != null && c.namesWithoutUuid.contains(lower)) return true;
+    Path path = primaryPath();
+    if (path == null) return false;
+    return isWhitelisted(path, uuid, username);
+  }
+
+  /** Checks an arbitrary backend's whitelist; treats missing files as open. */
+  public boolean isWhitelisted(String server, UUID uuid, String username) {
+    Path path = serverFiles.get(server);
+    if (path == null) return true; // no whitelist file tracked -> allow
+    return isWhitelisted(path, uuid, username);
+  }
+
+  /** Mirrors the network whitelist into the primary backend. */
+  public void ensureWhitelisted(UUID uuid, String username) {
+    Path path = primaryPath();
+    if (uuid == null || path == null) return;
+    String name = username == null ? "" : username.trim();
+    try {
+      if (updateFile(path, uuid, name)) {
+        cache.remove(path);
+      }
+    } catch (IOException ex) {
+      log.warn("Failed to update vanilla whitelist {}", path.toString().replace('\\','/'), ex);
+    }
+  }
+
+  private Path primaryPath() {
+    if (primaryName == null) return null;
+    return serverFiles.get(primaryName);
+  }
+
+  private boolean isWhitelisted(Path file, UUID uuid, String username) {
+    Cache c = cache.compute(file, (p, existing) -> loadIfNeeded(p, existing));
+    if (c == null) return false;
+    if (uuid != null && c.uuids.contains(uuid)) return true;
+    if (username != null && !username.isBlank()) {
+      if (c.namesWithoutUuid.contains(username.toLowerCase(Locale.ROOT))) return true;
     }
     return false;
-  }
-
-  public void ensureWhitelisted(UUID uuid, String username) {
-    if (uuid == null || files.isEmpty()) return;
-    String name = username == null ? "" : username.trim();
-    for (Path path : files) {
-      try {
-        if (updateFile(path, uuid, name)) {
-          cache.remove(path);
-        }
-      } catch (IOException ex) {
-        log.warn("Failed to update vanilla whitelist {}", path.toString().replace('\\','/'), ex);
-      }
-    }
   }
 
   private Cache loadIfNeeded(Path file, Cache existing) {
@@ -96,16 +128,6 @@ public final class VanillaWhitelistChecker {
       log.warn("Failed to read vanilla whitelist {}", file.toString().replace('\\','/'), ex);
       return existing;
     }
-  }
-
-  private List<Path> discoverWhitelistFiles(Config cfg) {
-    String primary = cfg.primaryServerName();
-    if (primary == null) return List.of();
-    ServerConfig sc = cfg.servers.get(primary);
-    if (sc == null || sc.workingDir == null || sc.workingDir.isBlank()) return List.of();
-    Path dir = Paths.get(sc.workingDir).normalize();
-    Path file = dir.resolve(VANILLA_FILE);
-    return List.of(file);
   }
 
   private boolean updateFile(Path file, UUID uuid, String username) throws IOException {
@@ -164,13 +186,13 @@ public final class VanillaWhitelistChecker {
       Entry e = entries.get(i);
       sb.append("  {");
       if (e.uuid() != null) {
-        sb.append("\"uuid\": \"").append(e.uuid()).append('"');
+        sb.append("\"uuid\": \"").append(e.uuid()).append('\"');
       } else {
         sb.append("\"uuid\": null");
       }
       sb.append(", \"name\": ");
       if (e.name() != null) {
-        sb.append('"').append(escapeJson(e.name())).append('"');
+        sb.append('\"').append(escapeJson(e.name())).append('\"');
       } else {
         sb.append("null");
       }

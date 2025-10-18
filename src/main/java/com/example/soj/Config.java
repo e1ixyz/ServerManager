@@ -38,6 +38,7 @@ public final class Config {
     public String usage          = "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green> [server]</white>";
     public String reloadSuccess  = "<green>ServerManager reloaded successfully.</green>";
     public String reloadFailed   = "<red>Reload failed. Check console for details.</red>";
+    public String notWhitelistedBackend = "<red>You are not whitelisted on <white><server></white>.</red>";
     public String started        = "<green>Started <white><server></white>.</green>";
     public String alreadyRunning = "<yellow><white><server></white> is already running.</yellow>";
     public String stopped        = "<yellow>Stopped <white><server></white>.</yellow>";
@@ -88,6 +89,7 @@ public final class Config {
           usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green> [server]</white>"
           reloadSuccess:  "<green>ServerManager reloaded successfully.</green>"
           reloadFailed:   "<red>Reload failed. Check console for details.</red>"
+          notWhitelistedBackend: "<red>You are not whitelisted on <white><server></white>.</red>"
           started:        "<green>Started <white><server></white>.</green>"
           alreadyRunning: "<yellow><white><server></white> is already running.</yellow>"
           stopped:        "<yellow>Stopped <white><server></white>.</yellow>"

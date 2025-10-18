@@ -190,16 +190,20 @@ public final class PlayerEvents {
 
     Player player = event.getPlayer();
 
-    if (!target.equals(primary) && whitelistEnabled()) {
+    boolean isPrimary = target.equals(primary);
+    if (isPrimary) {
       if (!hasNetworkAccess(player)) {
         handleNotWhitelisted(player, true);
         event.setResult(ServerPreConnectEvent.ServerResult.denied());
         return;
       }
-    } else if (!whitelistEnabled() && !hasNetworkAccess(player)) {
-      handleNotWhitelisted(player, true);
-      event.setResult(ServerPreConnectEvent.ServerResult.denied());
-      return;
+    } else {
+      if (vanillaWhitelist != null
+          && !vanillaWhitelist.isWhitelisted(target, player.getUniqueId(), player.getUsername())) {
+        event.setResult(ServerPreConnectEvent.ServerResult.denied());
+        player.sendMessage(mm(cfg.messages.notWhitelistedBackend, target, player.getUsername()));
+        return;
+      }
     }
 
     // Any managed server (including primary when not first-join):
