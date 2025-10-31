@@ -51,7 +51,7 @@ startupGraceSeconds: 15
 stopGraceSeconds: 60
 
 motd:
-  offline:  "<gray>Your Network</gray>"
+  offline:  "<gray>Your Network</gray> <gray>- <white><server></white></gray>"
   offline2: "<red><bold>Server Offline - Join to Start</bold></red>"
   starting: "<yellow><bold>Server Starting</bold></yellow>"
   starting2: "<gray>Please wait...</gray>"
@@ -149,7 +149,7 @@ Notes:
 - Hostnames are matched case-insensitively and may include ports (which are stripped). Leave the section empty to rely on the global defaults.
 
 ## Proxy MOTD States
-The Velocity ping uses the primary server status by default, or the forced-host override target when a hostname is configured:
+The Velocity ping uses the primary server status by default, or the forced-host override target when a hostname is configured. All MOTD strings may reference `<server>` (or `{server}`) to display the managed server name currently being tracked.
 - **Offline**: primary backend process is not running.
 - **Starting**: process has been launched but has not yet responded to a ping.
 - **Online**: ping succeeded recently (player connections will succeed immediately).

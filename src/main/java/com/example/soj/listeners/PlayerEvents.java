@@ -154,8 +154,9 @@ public final class PlayerEvents {
     }
 
     String mm = (l2 == null || l2.isBlank()) ? (l1 == null ? "" : l1) : (l1 + "<newline>" + l2);
-
-    Component description = MiniMessage.miniMessage().deserialize(mm);
+    String normalized = normalizePlaceholders(mm);
+    Component description = MiniMessage.miniMessage().deserialize(normalized,
+        Placeholder.unparsed("server", trackedServer == null ? "" : trackedServer));
     e.setPing(e.getPing().asBuilder().description(description).build());
   }
 
