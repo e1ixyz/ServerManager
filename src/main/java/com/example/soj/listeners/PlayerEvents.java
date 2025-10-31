@@ -70,6 +70,7 @@ public final class PlayerEvents {
   private final Set<String> loggedExplicitResolution = ConcurrentHashMap.newKeySet();
   private final Set<String> loggedVelocityResolution = ConcurrentHashMap.newKeySet();
   private final Set<String> loggedFallbackResolution = ConcurrentHashMap.newKeySet();
+  private final Set<String> loggedConnectHosts = ConcurrentHashMap.newKeySet();
 
   /** Lightweight readiness cache: true only after a successful ping. */
   private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
@@ -196,6 +197,14 @@ public final class PlayerEvents {
     if (!mgr.isKnown(target)) return; // only manage servers present in our config
 
     Player player = event.getPlayer();
+    String connectHost = player.getVirtualHost()
+        .map(addr -> addr.getHostString())
+        .orElse(null);
+    String normalizedConnectHost = normalizeHost(connectHost);
+    if (normalizedConnectHost != null && loggedConnectHosts.add(normalizedConnectHost)) {
+      log.info("Connect from host {} (normalized {}) -> target {}", connectHost, normalizedConnectHost, target);
+    }
+
     String primary = cfg.primaryServerName();
     boolean running = mgr.isRunning(target);
     boolean isPrimary = target.equals(primary);
