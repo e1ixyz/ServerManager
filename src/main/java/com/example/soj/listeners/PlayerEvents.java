@@ -106,6 +106,15 @@ public final class PlayerEvents {
       });
     }
 
+    Map<String, List<String>> velocityHosts = proxy.getConfiguration().getForcedHosts();
+    if (velocityHosts != null && !velocityHosts.isEmpty()) {
+      velocityHosts.forEach((host, targets) -> {
+        log.info("Velocity forced-host {} -> {}", host, targets);
+      });
+    } else {
+      log.info("Velocity forced-host configuration empty.");
+    }
+
     // Periodically ping all known servers to update readiness (for accurate MOTD)
     this.heartbeatTask = proxy.getScheduler().buildTask(pluginOwner, () -> {
       for (String name : cfg.servers.keySet()) {
@@ -197,12 +206,17 @@ public final class PlayerEvents {
     if (!mgr.isKnown(target)) return; // only manage servers present in our config
 
     Player player = event.getPlayer();
-    String connectHost = player.getVirtualHost()
-        .map(addr -> addr.getHostString())
-        .orElse(null);
+    var connectVirtual = player.getVirtualHost();
+    String connectHost = connectVirtual.map(addr -> addr.getHostString()).orElse(null);
     String normalizedConnectHost = normalizeHost(connectHost);
-    if (normalizedConnectHost != null && loggedConnectHosts.add(normalizedConnectHost)) {
-      log.info("Connect from host {} (normalized {}) -> target {}", connectHost, normalizedConnectHost, target);
+    if (normalizedConnectHost != null) {
+      if (loggedConnectHosts.add(normalizedConnectHost)) {
+        log.info("Connect from host {} (normalized {}) -> target {}", connectHost, normalizedConnectHost, target);
+      }
+    } else if (connectVirtual.isPresent() && loggedConnectHosts.add("<null-host>")) {
+      log.info("Connect received with raw host {} (normalized null) -> target {}", connectHost, target);
+    } else if (connectVirtual.isEmpty() && loggedConnectHosts.add("<empty-host>")) {
+      log.info("Connect received with no virtual host -> target {}", target);
     }
 
     String primary = cfg.primaryServerName();
