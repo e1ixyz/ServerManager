@@ -65,6 +65,9 @@ public final class PlayerEvents {
   private final Map<UUID, String> waitingTarget = new ConcurrentHashMap<>();
   /** Ensures the "ready → sending you now" path fires only once per wait. */
   private final Set<UUID> readyNotifyOnce = ConcurrentHashMap.newKeySet();
+  /** Ensures forced-host resolution logs at most once per hostname per proxy life. */
+  private final Set<String> loggedVelocityResolution = ConcurrentHashMap.newKeySet();
+  private final Set<String> loggedFallbackResolution = ConcurrentHashMap.newKeySet();
 
   /** Lightweight readiness cache: true only after a successful ping. */
   private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
@@ -94,6 +97,8 @@ public final class PlayerEvents {
         String normalized = normalizeHost(host);
         if (normalized != null && settings != null) {
           forcedHostOverrides.put(normalized, settings);
+          String target = sanitizeServerName(settings.server);
+          log.info("Registered forced-host override {} -> {}", normalized, target == null ? "<unset>" : target);
         }
       });
     }
@@ -537,12 +542,25 @@ public final class PlayerEvents {
 
   private String resolveTrackedServer(Config.ForcedHost hostCfg, String normalizedHost) {
     String explicit = (hostCfg != null) ? sanitizeServerName(hostCfg.server) : null;
-    if (explicit != null) return explicit;
+    if (explicit != null) {
+      return explicit;
+    }
 
     String viaVelocity = findVelocityForcedHost(normalizedHost);
-    if (viaVelocity != null) return viaVelocity;
+    if (viaVelocity != null) {
+      if (normalizedHost != null && loggedVelocityResolution.add(normalizedHost)) {
+        log.info("Forced host {} resolved via Velocity config -> {}", normalizedHost, viaVelocity);
+      }
+      return viaVelocity;
+    }
 
-    return sanitizeServerName(cfg.primaryServerName());
+    String primary = sanitizeServerName(cfg.primaryServerName());
+    if (normalizedHost != null) {
+      if (loggedFallbackResolution.add(normalizedHost)) {
+        log.info("Forced host {} not mapped; falling back to primary {}", normalizedHost, primary);
+      }
+    }
+    return primary;
   }
 
   private String findVelocityForcedHost(String normalizedHost) {
