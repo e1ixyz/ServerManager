@@ -71,6 +71,8 @@ public final class PlayerEvents {
   private final Set<String> loggedVelocityResolution = ConcurrentHashMap.newKeySet();
   private final Set<String> loggedFallbackResolution = ConcurrentHashMap.newKeySet();
   private final Set<String> loggedConnectHosts = ConcurrentHashMap.newKeySet();
+  /** Last backend each player successfully reached (for disconnect scheduling). */
+  private final Map<UUID, String> lastKnownServer = new ConcurrentHashMap<>();
 
   /** Lightweight readiness cache: true only after a successful ping. */
   private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
@@ -306,6 +308,7 @@ public final class PlayerEvents {
     // Cancel any pending stop for the server they just joined
     String joined = e.getServer().getServerInfo().getName();
     cancelPendingServerStop(joined);
+    lastKnownServer.put(e.getPlayer().getUniqueId(), joined);
 
     // If they switched from another backend, maybe that one is now empty -> schedule stop for it
     e.getPreviousServer().ifPresent(prev -> {
@@ -324,6 +327,10 @@ public final class PlayerEvents {
       String name = conn.getServerInfo().getName();
       scheduleStopIfServerEmpty(name);
     });
+    String last = lastKnownServer.remove(id);
+    if (last != null) {
+      scheduleStopIfServerEmpty(last);
+    }
 
     // If the proxy became empty, also arm the stop-all as a safety net
     scheduleStopAllIfProxyEmpty();
@@ -676,6 +683,7 @@ public final class PlayerEvents {
     pendingConnectStartMs.clear();
     waitingTarget.clear();
     readyNotifyOnce.clear();
+    lastKnownServer.clear();
     heartbeatTask.cancel();
   }
 }
