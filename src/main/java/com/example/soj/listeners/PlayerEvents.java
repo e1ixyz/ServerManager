@@ -66,6 +66,7 @@ public final class PlayerEvents {
   /** Ensures the "ready → sending you now" path fires only once per wait. */
   private final Set<UUID> readyNotifyOnce = ConcurrentHashMap.newKeySet();
   /** Ensures forced-host resolution logs at most once per hostname per proxy life. */
+  private final Set<String> loggedPingHosts = ConcurrentHashMap.newKeySet();
   private final Set<String> loggedExplicitResolution = ConcurrentHashMap.newKeySet();
   private final Set<String> loggedVelocityResolution = ConcurrentHashMap.newKeySet();
   private final Set<String> loggedFallbackResolution = ConcurrentHashMap.newKeySet();
@@ -121,9 +122,15 @@ public final class PlayerEvents {
   // -------------------- MOTD --------------------
   @Subscribe
   public void onPing(ProxyPingEvent e) {
-    String normalizedHost = e.getConnection().getVirtualHost()
-        .map(addr -> normalizeHost(addr.getHostString()))
+    var rawHost = e.getConnection().getVirtualHost()
+        .map(addr -> addr.getHostString())
         .orElse(null);
+    String normalizedHost = normalizeHost(rawHost);
+    if (normalizedHost != null && loggedPingHosts.add(normalizedHost)) {
+      boolean hasOverride = forcedHostOverrides.containsKey(normalizedHost);
+      String velocityTargets = proxy.getConfiguration().getForcedHosts().getOrDefault(normalizedHost, List.of()).toString();
+      log.info("Ping from host {} (normalized {}) -> override? {} velocity targets {}", rawHost, normalizedHost, hasOverride, velocityTargets);
+    }
     Config.ForcedHost hostCfg = (normalizedHost == null) ? null : forcedHostOverrides.get(normalizedHost);
 
     Config.Motd baseMotd = cfg.motd;
