@@ -16,6 +16,8 @@ public final class Config {
 
   public Motd motd = new Motd();
   public Map<String, ServerConfig> servers = new LinkedHashMap<>();
+  /** Optional forced-host overrides keyed by hostname (case-insensitive). */
+  public Map<String, ForcedHost> forcedHosts = new LinkedHashMap<>();
   public Messages messages = new Messages();
   public Whitelist whitelist = new Whitelist();
 
@@ -64,6 +66,15 @@ public final class Config {
     public String successMessage = "Success! You are now whitelisted. You may rejoin the server.";
     public String failureMessage = "Invalid or expired code. Please try again from in-game.";
     public String buttonText = "Verify & Whitelist";
+  }
+
+  public static final class ForcedHost {
+    /** Managed server name Velocity routes this host to. */
+    public String server;
+    /** Optional MOTD overrides for this host; falls back to global MOTD when null. */
+    public Motd motd;
+    /** Optional kick message when start-on-join kicks the player. */
+    public String kickMessage;
   }
 
   public static Config loadOrCreateDefault(Path path, Logger log) throws Exception {
@@ -121,6 +132,7 @@ public final class Config {
           successMessage: "Success! You are now whitelisted. You may rejoin the server."
           failureMessage: "Invalid or expired code. Please try again from in-game."
           buttonText: "Verify & Whitelist"
+        forcedHosts: {}
         """;
       Files.createDirectories(path.getParent());
       Files.writeString(path, defaultYaml, StandardCharsets.UTF_8);
@@ -151,6 +163,7 @@ public final class Config {
     if (cfg.motd == null) cfg.motd = new Motd();
     if (cfg.messages == null) cfg.messages = new Messages();
     if (cfg.whitelist == null) cfg.whitelist = new Whitelist();
+    if (cfg.forcedHosts == null) cfg.forcedHosts = new LinkedHashMap<>();
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;
     if (cfg.stopGraceSeconds < 0) cfg.stopGraceSeconds = 0;

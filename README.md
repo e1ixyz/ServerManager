@@ -4,6 +4,7 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
 
 ## Highlights
 - Starts the designated primary backend automatically on the first join and redirects the player with a customizable kick message.
+- Honors Velocity forced-host routing: when the proxy points a first-join at a non-primary backend, that server is started instead, with optional per-host MOTD and kick overrides.
 - Intercepts `/server <name>` (or GUI menu joins) to launch offline managed servers, keeps the player online, queues the connection, and auto-sends once the ping succeeds.
 - Three-state MOTD (offline/starting/online) driven by MiniMessage templates, including a distinct "starting" banner.
 - Graceful per-server shutdowns when a backend empties, plus a safety stop-all when the entire proxy is empty with optional startup grace.
@@ -106,6 +107,14 @@ whitelist:
   successMessage: "Success! You are now whitelisted. You may rejoin the server."
   failureMessage: "Invalid or expired code. Please try again from in-game."
   buttonText: "Verify & Whitelist"
+
+forcedHosts:
+  "creative.play.example.com":
+    server: "creative"
+    motd:
+      offline: "<gray>Creative Realm</gray>"
+      online: "<green><bold>Creative Ready</bold></green>"
+    kickMessage: "Creative is waking up—please reconnect in a moment."
 ```
 
 Key points:
@@ -133,8 +142,14 @@ Notes:
 - Codes expire after `codeTtlSeconds` and are one-time. Requesting a new code replaces the old one.
 - `network-whitelist.yml` is written atomically and can be edited manually while Velocity is offline if needed.
 
+## Forced-Host Overrides
+- Each hostname under `forcedHosts` maps to a managed server name. When a player joins through that host (including their very first proxy join), the plugin starts that backend instead of the primary start-on-join server.
+- Optional `motd` blocks mirror the top-level MOTD structure; any missing field falls back to the global text.
+- `kickMessage` lets you display host-specific messaging when a backend must boot before the player can connect.
+- Hostnames are matched case-insensitively and may include ports (which are stripped). Leave the section empty to rely on the global defaults.
+
 ## Proxy MOTD States
-The Velocity ping uses the primary server status:
+The Velocity ping uses the primary server status by default, or the forced-host override target when a hostname is configured:
 - **Offline**: primary backend process is not running.
 - **Starting**: process has been launched but has not yet responded to a ping.
 - **Online**: ping succeeded recently (player connections will succeed immediately).

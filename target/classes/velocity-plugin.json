@@ -1,1 +1,7 @@
-{"id":"servermanager","name":"ServerManager","version":"0.1.0","authors":["e1ixyz"],"dependencies":[],"main":"com.example.soj.ServerManagerPlugin"}
+{
+  "id": "servermanager",
+  "name": "ServerManager",
+  "version": "0.1.0",
+  "main": "com.example.soj.ServerManagerPlugin",
+  "authors": ["e1ixyz"]
+}

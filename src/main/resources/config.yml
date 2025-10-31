@@ -50,3 +50,5 @@ servers:
     stopCommand: "stop"
     logToFile: true
     logFile: "logs/proxy-managed-creative.log"
+
+forcedHosts: {}

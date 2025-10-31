@@ -21,6 +21,8 @@ import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -47,6 +49,7 @@ public final class PlayerEvents {
   private final WhitelistService whitelist;
   private final VanillaWhitelistChecker vanillaWhitelist;
   private final Config.Whitelist whitelistCfg;
+  private final Map<String, Config.ForcedHost> forcedHostOverrides;
 
   /** Proxy-empty stop-all task */
   private volatile ScheduledTask pendingStopAll;
@@ -84,6 +87,15 @@ public final class PlayerEvents {
     this.whitelist = whitelist;
     this.vanillaWhitelist = vanillaWhitelist;
     this.whitelistCfg = (whitelist != null) ? whitelist.config() : null;
+    this.forcedHostOverrides = new HashMap<>();
+    if (cfg.forcedHosts != null) {
+      cfg.forcedHosts.forEach((host, settings) -> {
+        String normalized = normalizeHost(host);
+        if (normalized != null && settings != null) {
+          forcedHostOverrides.put(normalized, settings);
+        }
+      });
+    }
 
     // Periodically ping all known servers to update readiness (for accurate MOTD)
     this.heartbeatTask = proxy.getScheduler().buildTask(pluginOwner, () -> {
@@ -102,26 +114,42 @@ public final class PlayerEvents {
   // -------------------- MOTD --------------------
   @Subscribe
   public void onPing(ProxyPingEvent e) {
-    String primary = cfg.primaryServerName();
+    Config.ForcedHost hostCfg = e.getConnection().getVirtualHost()
+        .map(addr -> forcedHostOverrides.get(normalizeHost(addr.getHostString())))
+        .orElse(null);
 
-    String l1 = cfg.motd.offline;
-    String l2 = cfg.motd.offline2;
+    Config.Motd baseMotd = cfg.motd;
+    Config.Motd override = (hostCfg != null) ? hostCfg.motd : null;
 
-    if (primary != null) {
-      boolean running = mgr.isRunning(primary);
-      Boolean ready = isReadyCache.get(primary);
-      boolean online = Boolean.TRUE.equals(ready);
-      boolean starting = running && !online;
+    String offline = override != null && override.offline != null ? override.offline : baseMotd.offline;
+    String offline2 = override != null && override.offline2 != null ? override.offline2 : baseMotd.offline2;
+    String starting = override != null && override.starting != null ? override.starting : baseMotd.starting;
+    String starting2 = override != null && override.starting2 != null ? override.starting2 : baseMotd.starting2;
+    String online = override != null && override.online != null ? override.online : baseMotd.online;
+    String online2 = override != null && override.online2 != null ? override.online2 : baseMotd.online2;
 
-      if (online) {
-        l1 = cfg.motd.online;
-        l2 = cfg.motd.online2;
-      } else if (starting) {
-        l1 = firstNonBlank(cfg.motd.starting, cfg.motd.online, cfg.motd.offline);
-        l2 = firstNonBlank(cfg.motd.starting2, cfg.motd.online2, cfg.motd.offline2);
+    String trackedServer = sanitizeServerName(
+        (hostCfg != null && hostCfg.server != null) ? hostCfg.server : cfg.primaryServerName()
+    );
+
+    String l1 = offline;
+    String l2 = offline2;
+
+    if (trackedServer != null) {
+      boolean running = mgr.isRunning(trackedServer);
+      Boolean ready = isReadyCache.get(trackedServer);
+      boolean onlineState = Boolean.TRUE.equals(ready);
+      boolean startingState = running && !onlineState;
+
+      if (onlineState) {
+        l1 = online;
+        l2 = online2;
+      } else if (startingState) {
+        l1 = firstNonBlank(starting, online, offline);
+        l2 = firstNonBlank(starting2, online2, offline2);
       } else {
-        l1 = cfg.motd.offline;
-        l2 = cfg.motd.offline2;
+        l1 = offline;
+        l2 = offline2;
       }
     }
 
@@ -141,23 +169,6 @@ public final class PlayerEvents {
     if (!hasNetworkAccess(joining)) {
       handleNotWhitelisted(joining, true);
       e.setResult(LoginEvent.ComponentResult.denied(Component.empty()));
-      return;
-    }
-
-    String primary = cfg.primaryServerName();
-    if (primary == null) return;
-
-    if (proxy.getAllPlayers().isEmpty() && !mgr.isRunning(primary)) {
-      try {
-        log.info("First join detected by {} -> starting primary [{}]", joining.getUsername(), primary);
-        mgr.start(primary);
-      } catch (IOException ex) {
-        log.error("Failed to start primary server {}", primary, ex);
-      }
-      // Kick to menu with simple text (disconnect screen isn't MiniMessage)
-      e.setResult(LoginEvent.ComponentResult.denied(Component.text(cfg.kickMessage)));
-      // After kick, proxy becomes empty; arm stop-all safety with grace bump
-      scheduleStopAllIfProxyEmpty();
     }
   }
 
@@ -169,28 +180,16 @@ public final class PlayerEvents {
     if (target == null) return;
     if (!mgr.isKnown(target)) return; // only manage servers present in our config
 
+    Player player = event.getPlayer();
     String primary = cfg.primaryServerName();
     boolean running = mgr.isRunning(target);
-    int onlineCount = proxy.getAllPlayers().size();
-
-    // Primary, first-ever join from menu -> legacy (start + disconnect)
-    if (target.equals(primary) && !running && onlineCount <= 1) {
-      try {
-        log.info("Intercepting first join to [{}]; starting & kicking with '{}'", primary, cfg.kickMessage);
-        mgr.start(primary);
-      } catch (IOException ex) {
-        log.error("Failed to start primary server {}", primary, ex);
-      }
-      event.setResult(ServerPreConnectEvent.ServerResult.denied());
-      event.getPlayer().disconnect(Component.text(cfg.kickMessage));
-      // Proxy will be empty after disconnect; ensure stop-all timer is armed
-      scheduleStopAllIfProxyEmpty();
-      return;
-    }
-
-    Player player = event.getPlayer();
-
     boolean isPrimary = target.equals(primary);
+    boolean hasFallback = player.getCurrentServer().isPresent();
+
+    Config.ForcedHost hostCfg = player.getVirtualHost()
+        .map(addr -> forcedHostOverrides.get(normalizeHost(addr.getHostString()))).orElse(null);
+    String kickMessage = resolveKickMessage(hostCfg);
+
     if (isPrimary) {
       if (!hasNetworkAccess(player)) {
         handleNotWhitelisted(player, true);
@@ -209,6 +208,24 @@ public final class PlayerEvents {
     // Any managed server (including primary when not first-join):
     // If offline, start it, deny immediate connect, message the player, and queue auto-send.
     if (!running) {
+      if (!hasFallback) {
+        try {
+          log.info("Intercepting initial connect to offline [{}]; starting process for {}", target, player.getUsername());
+          mgr.start(target);
+        } catch (IOException ex) {
+          log.error("Failed to start server {}", target, ex);
+          event.setResult(ServerPreConnectEvent.ServerResult.denied());
+          player.disconnect(mm(cfg.messages.startFailed, target, player.getUsername()));
+          scheduleStopAllIfProxyEmpty();
+          return;
+        }
+
+        event.setResult(ServerPreConnectEvent.ServerResult.denied());
+        player.disconnect(Component.text(kickMessage));
+        scheduleStopAllIfProxyEmpty();
+        return;
+      }
+
       UUID id = event.getPlayer().getUniqueId();
 
       String waiting = waitingTarget.get(id);
@@ -507,6 +524,30 @@ public final class PlayerEvents {
     if (!mgr.sendCommand(primary, cmd)) {
       log.warn("Failed to dispatch '{}' to {} after whitelist sync", cmd, primary);
     }
+  }
+
+  private String resolveKickMessage(Config.ForcedHost hostCfg) {
+    if (hostCfg != null && hostCfg.kickMessage != null && !hostCfg.kickMessage.isBlank()) {
+      return hostCfg.kickMessage;
+    }
+    return cfg.kickMessage;
+  }
+
+  private static String sanitizeServerName(String name) {
+    if (name == null) return null;
+    String trimmed = name.trim();
+    return trimmed.isEmpty() ? null : trimmed;
+  }
+
+  private static String normalizeHost(String host) {
+    if (host == null) return null;
+    String value = host.trim();
+    if (value.isEmpty()) return null;
+    int colon = value.indexOf(':');
+    if (colon >= 0) value = value.substring(0, colon);
+    if (value.endsWith(".")) value = value.substring(0, value.length() - 1);
+    if (value.isEmpty()) return null;
+    return value.toLowerCase(Locale.ROOT);
   }
 
   private static String normalizePlaceholders(String s) {
