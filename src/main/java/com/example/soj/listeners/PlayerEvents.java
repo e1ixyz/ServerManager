@@ -66,6 +66,7 @@ public final class PlayerEvents {
   /** Ensures the "ready → sending you now" path fires only once per wait. */
   private final Set<UUID> readyNotifyOnce = ConcurrentHashMap.newKeySet();
   /** Ensures forced-host resolution logs at most once per hostname per proxy life. */
+  private final Set<String> loggedExplicitResolution = ConcurrentHashMap.newKeySet();
   private final Set<String> loggedVelocityResolution = ConcurrentHashMap.newKeySet();
   private final Set<String> loggedFallbackResolution = ConcurrentHashMap.newKeySet();
 
@@ -543,6 +544,9 @@ public final class PlayerEvents {
   private String resolveTrackedServer(Config.ForcedHost hostCfg, String normalizedHost) {
     String explicit = (hostCfg != null) ? sanitizeServerName(hostCfg.server) : null;
     if (explicit != null) {
+      if (normalizedHost != null && loggedExplicitResolution.add(normalizedHost)) {
+        log.info("Forced host {} resolved via plugin config -> {}", normalizedHost, explicit);
+      }
       return explicit;
     }
 
