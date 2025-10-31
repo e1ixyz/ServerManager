@@ -132,13 +132,16 @@ public final class PlayerEvents {
   // -------------------- MOTD --------------------
   @Subscribe
   public void onPing(ProxyPingEvent e) {
-    var rawHost = e.getConnection().getVirtualHost()
-        .map(addr -> addr.getHostString())
-        .orElse(null);
+    var hostOpt = e.getConnection().getVirtualHost();
+    String rawHost = hostOpt.map(addr -> addr.getHostString()).orElse(null);
     String normalizedHost = normalizeHost(rawHost);
-    if (normalizedHost != null && loggedPingHosts.add(normalizedHost)) {
-      boolean hasOverride = forcedHostOverrides.containsKey(normalizedHost);
-      String velocityTargets = proxy.getConfiguration().getForcedHosts().getOrDefault(normalizedHost, List.of()).toString();
+    String logKey = (normalizedHost != null) ? normalizedHost : (rawHost != null ? rawHost : "<null>");
+    if (loggedPingHosts.add(logKey)) {
+      boolean hasOverride = (normalizedHost != null) && forcedHostOverrides.containsKey(normalizedHost);
+      Map<String, List<String>> forced = proxy.getConfiguration().getForcedHosts();
+      List<String> velocityTargets = (normalizedHost != null && forced != null)
+          ? forced.getOrDefault(normalizedHost, List.of())
+          : List.of();
       log.info("Ping from host {} (normalized {}) -> override? {} velocity targets {}", rawHost, normalizedHost, hasOverride, velocityTargets);
     }
     Config.ForcedHost hostCfg = (normalizedHost == null) ? null : forcedHostOverrides.get(normalizedHost);
