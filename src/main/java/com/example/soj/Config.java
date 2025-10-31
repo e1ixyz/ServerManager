@@ -84,19 +84,19 @@ public final class Config {
         startupGraceSeconds: 15
         stopGraceSeconds: 60
         motd:
-          offline:  "<gray>eli server :3</gray>"
+          offline:  "<gray>Your Network</gray>"
           offline2: "<red><bold>Server Offline - Join to Start</bold></red>"
           starting: "<yellow><bold>Server Starting</bold></yellow>"
           starting2: "<gray>Please wait...</gray>"
-          online:   "<gray>eli server :3</gray>"
+          online:   "<gray>Your Network</gray>"
           online2:  "<green><bold>Server Online</bold></green>"
         messages:
-          startingQueued: "<yellow>Starting <white><server></white>… You’ll be sent automatically.</yellow>"
+          startingQueued: "<yellow>Starting <white><server></white>… You'll be sent automatically.</yellow>"
           startFailed:    "<red>Failed to start <white><server></white>. Try again.</red>"
           readySending:   "<green><white><server></white> is ready. Sending you now…</green>"
-          timeout:        "<red><white><server></white> didn’t come up in time.</red>"
+          timeout:        "<red><white><server></white> didn't come up in time.</red>"
           unknownServer:  "<red>Unknown server <white><server></white>.</red>"
-          noPermission:   "<red>You don’t have permission.</red>"
+          noPermission:   "<red>You don't have permission.</red>"
           usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green> [server]</white>"
           reloadSuccess:  "<green>ServerManager reloaded successfully.</green>"
           reloadFailed:   "<red>Reload failed. Check console for details.</red>"
@@ -110,13 +110,20 @@ public final class Config {
           stateOnline:    "<green>online</green>"
           stateOffline:   "<red>offline</red>"
         servers:
-          testing:
+          lobby:
             startOnJoin: true
-            workingDir: "../testing-1.21.8"
-            startCommand: "java -Xms4096M -Xmx4096M -jar paper-1.21.8-49.jar nogui"
+            workingDir: "../lobby"
+            startCommand: "./start.sh"
             stopCommand: "stop"
             logToFile: true
-            logFile: "logs/proxy-managed-testing.log"
+            logFile: "logs/proxy-managed-lobby.log"
+          survival:
+            startOnJoin: false
+            workingDir: "../survival"
+            startCommand: "./start.sh"
+            stopCommand: "stop"
+            logToFile: true
+            logFile: "logs/proxy-managed-survival.log"
         whitelist:
           enabled: false
           bind: "0.0.0.0"

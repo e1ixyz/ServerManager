@@ -22,6 +22,7 @@ import org.slf4j.Logger;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -114,9 +115,10 @@ public final class PlayerEvents {
   // -------------------- MOTD --------------------
   @Subscribe
   public void onPing(ProxyPingEvent e) {
-    Config.ForcedHost hostCfg = e.getConnection().getVirtualHost()
-        .map(addr -> forcedHostOverrides.get(normalizeHost(addr.getHostString())))
+    String normalizedHost = e.getConnection().getVirtualHost()
+        .map(addr -> normalizeHost(addr.getHostString()))
         .orElse(null);
+    Config.ForcedHost hostCfg = (normalizedHost == null) ? null : forcedHostOverrides.get(normalizedHost);
 
     Config.Motd baseMotd = cfg.motd;
     Config.Motd override = (hostCfg != null) ? hostCfg.motd : null;
@@ -128,9 +130,7 @@ public final class PlayerEvents {
     String online = override != null && override.online != null ? override.online : baseMotd.online;
     String online2 = override != null && override.online2 != null ? override.online2 : baseMotd.online2;
 
-    String trackedServer = sanitizeServerName(
-        (hostCfg != null && hostCfg.server != null) ? hostCfg.server : cfg.primaryServerName()
-    );
+    String trackedServer = resolveTrackedServer(hostCfg, normalizedHost);
 
     String l1 = offline;
     String l2 = offline2;
@@ -533,6 +533,39 @@ public final class PlayerEvents {
       return hostCfg.kickMessage;
     }
     return cfg.kickMessage;
+  }
+
+  private String resolveTrackedServer(Config.ForcedHost hostCfg, String normalizedHost) {
+    String explicit = (hostCfg != null) ? sanitizeServerName(hostCfg.server) : null;
+    if (explicit != null) return explicit;
+
+    String viaVelocity = findVelocityForcedHost(normalizedHost);
+    if (viaVelocity != null) return viaVelocity;
+
+    return sanitizeServerName(cfg.primaryServerName());
+  }
+
+  private String findVelocityForcedHost(String normalizedHost) {
+    if (normalizedHost == null) return null;
+    Map<String, List<String>> forced = proxy.getConfiguration().getForcedHosts();
+    if (forced == null || forced.isEmpty()) return null;
+
+    List<String> direct = forced.get(normalizedHost);
+    if (direct == null) {
+      for (var entry : forced.entrySet()) {
+        if (normalizeHost(entry.getKey()).equals(normalizedHost)) {
+          direct = entry.getValue();
+          break;
+        }
+      }
+    }
+    if (direct == null || direct.isEmpty()) return null;
+
+    for (String candidate : direct) {
+      String sanitized = sanitizeServerName(candidate);
+      if (sanitized != null) return sanitized;
+    }
+    return null;
   }
 
   private static String sanitizeServerName(String name) {
