@@ -176,7 +176,8 @@ public final class PlayerEvents {
   @Subscribe
   public void onServerPreConnect(ServerPreConnectEvent event) {
     RegisteredServer original = event.getOriginalServer();
-    String target = (original != null) ? original.getServerInfo().getName() : null;
+    RegisteredServer effective = event.getResult().getServer().orElse(original);
+    String target = (effective != null) ? effective.getServerInfo().getName() : null;
     if (target == null) return;
     if (!mgr.isKnown(target)) return; // only manage servers present in our config
 
