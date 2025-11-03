@@ -53,9 +53,9 @@ stopGraceSeconds: 60
 motd:
   offline:  "<gray>Your Network</gray> <gray>- <white><server></white></gray>"
   offline2: "<red><bold>Server Offline - Join to Start</bold></red>"
-  starting: "<yellow><bold>Server Starting</bold></yellow>"
+  starting: "<yellow><bold>Server Starting</bold></yellow> <white><server></white>"
   starting2: "<gray>Please wait...</gray>"
-  online:   "<gray>Your Network</gray>"
+  online:   "<gray>Your Network</gray> <gray>- <white><server></white></gray>"
   online2:  "<green><bold>Server Online</bold></green>"
 
 messages:
@@ -76,27 +76,27 @@ messages:
   stateOffline:   "<red>offline</red>"
 
 servers:
-  testing:
+  lobby:
     startOnJoin: true
-    workingDir: "../testing-1.21.8"
-    startCommand: "java -Xms4096M -Xmx4096M -jar paper-1.21.8-49.jar nogui"
+    workingDir: "../lobby"
+    startCommand: "./start.sh"
     stopCommand: "stop"
     logToFile: true
-    logFile: "logs/proxy-managed-testing.log"
+    logFile: "logs/proxy-managed-lobby.log"
 
-  creative:
+  survival:
     startOnJoin: false
-    workingDir: "../creative-1.21.8"
-    startCommand: "java -Xms4096M -Xmx4096M -jar paper-1.21.8-49.jar nogui"
+    workingDir: "../survival"
+    startCommand: "./start.sh"
     stopCommand: "stop"
     logToFile: true
-    logFile: "logs/proxy-managed-creative.log"
+    logFile: "logs/proxy-managed-survival.log"
 
 whitelist:
   enabled: true
   bind: "0.0.0.0"
   port: 8081
-  baseUrl: "https://play.example.com/whitelist"
+  baseUrl: "http://127.0.0.1:8081"
   kickMessage: "You are not whitelisted. Visit <url> and enter your username and code <code>."
   codeLength: 6
   codeTtlSeconds: 900
@@ -108,13 +108,7 @@ whitelist:
   failureMessage: "Invalid or expired code. Please try again from in-game."
   buttonText: "Verify & Whitelist"
 
-forcedHosts:
-  "creative.play.example.com":
-    server: "creative"
-    motd:
-      offline: "<gray>Creative Realm</gray>"
-      online: "<green><bold>Creative Ready</bold></green>"
-    kickMessage: "Creative is waking up—please reconnect in a moment."
+forcedHosts: {}
 ```
 
 Key points:
@@ -147,6 +141,18 @@ Notes:
 - Optional `motd` blocks mirror the top-level MOTD structure; any missing field falls back to the global text.
 - `kickMessage` lets you display host-specific messaging when a backend must boot before the player can connect.
 - Hostnames are matched case-insensitively and may include ports (which are stripped). Leave the section empty to rely on the global defaults.
+- MOTD overrides (and the `{server}` placeholder) require the status ping to reach Velocity with the same hostname. If you front Velocity with a proxy/DDoS shield such as TCPShield or Cloudflare Spectrum, register each forced-host subdomain so the ping is not rewritten to the root domain; otherwise the MOTD falls back to the primary server.
+
+Example:
+
+```yaml
+forcedHosts:
+  creative.example.com:
+    server: creative
+    motd:
+      online: "<gray>Creative Realm</gray> <green>[Online]</green>"
+    kickMessage: "Creative is waking up—please reconnect in a moment."
+```
 
 ## Proxy MOTD States
 The Velocity ping uses the primary server status by default, or the forced-host override target when a hostname is configured. All MOTD strings may reference `<server>` (or `{server}`) to display the managed server name currently being tracked.

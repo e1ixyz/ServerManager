@@ -65,12 +65,6 @@ public final class PlayerEvents {
   private final Map<UUID, String> waitingTarget = new ConcurrentHashMap<>();
   /** Ensures the "ready → sending you now" path fires only once per wait. */
   private final Set<UUID> readyNotifyOnce = ConcurrentHashMap.newKeySet();
-  /** Ensures forced-host resolution logs at most once per hostname per proxy life. */
-  private final Set<String> loggedPingHosts = ConcurrentHashMap.newKeySet();
-  private final Set<String> loggedExplicitResolution = ConcurrentHashMap.newKeySet();
-  private final Set<String> loggedVelocityResolution = ConcurrentHashMap.newKeySet();
-  private final Set<String> loggedFallbackResolution = ConcurrentHashMap.newKeySet();
-  private final Set<String> loggedConnectHosts = ConcurrentHashMap.newKeySet();
   /** Last backend each player successfully reached (for disconnect scheduling). */
   private final Map<UUID, String> lastKnownServer = new ConcurrentHashMap<>();
 
@@ -134,18 +128,10 @@ public final class PlayerEvents {
   // -------------------- MOTD --------------------
   @Subscribe
   public void onPing(ProxyPingEvent e) {
-    var hostOpt = e.getConnection().getVirtualHost();
-    String rawHost = hostOpt.map(addr -> addr.getHostString()).orElse(null);
+    String rawHost = e.getConnection().getVirtualHost()
+        .map(addr -> addr.getHostString())
+        .orElse(null);
     String normalizedHost = normalizeHost(rawHost);
-    String logKey = (normalizedHost != null) ? normalizedHost : (rawHost != null ? rawHost : "<null>");
-    if (loggedPingHosts.add(logKey)) {
-      boolean hasOverride = (normalizedHost != null) && forcedHostOverrides.containsKey(normalizedHost);
-      Map<String, List<String>> forced = proxy.getConfiguration().getForcedHosts();
-      List<String> velocityTargets = (normalizedHost != null && forced != null)
-          ? forced.getOrDefault(normalizedHost, List.of())
-          : List.of();
-      log.info("Ping from host {} (normalized {}) -> override? {} velocity targets {}", rawHost, normalizedHost, hasOverride, velocityTargets);
-    }
     Config.ForcedHost hostCfg = (normalizedHost == null) ? null : forcedHostOverrides.get(normalizedHost);
 
     Config.Motd baseMotd = cfg.motd;
@@ -211,19 +197,6 @@ public final class PlayerEvents {
     if (!mgr.isKnown(target)) return; // only manage servers present in our config
 
     Player player = event.getPlayer();
-    var connectVirtual = player.getVirtualHost();
-    String connectHost = connectVirtual.map(addr -> addr.getHostString()).orElse(null);
-    String normalizedConnectHost = normalizeHost(connectHost);
-    if (normalizedConnectHost != null) {
-      if (loggedConnectHosts.add(normalizedConnectHost)) {
-        log.info("Connect from host {} (normalized {}) -> target {}", connectHost, normalizedConnectHost, target);
-      }
-    } else if (connectVirtual.isPresent() && loggedConnectHosts.add("<null-host>")) {
-      log.info("Connect received with raw host {} (normalized null) -> target {}", connectHost, target);
-    } else if (connectVirtual.isEmpty() && loggedConnectHosts.add("<empty-host>")) {
-      log.info("Connect received with no virtual host -> target {}", target);
-    }
-
     String primary = cfg.primaryServerName();
     boolean running = mgr.isRunning(target);
     boolean isPrimary = target.equals(primary);
@@ -583,27 +556,12 @@ public final class PlayerEvents {
 
   private String resolveTrackedServer(Config.ForcedHost hostCfg, String normalizedHost) {
     String explicit = (hostCfg != null) ? sanitizeServerName(hostCfg.server) : null;
-    if (explicit != null) {
-      if (normalizedHost != null && loggedExplicitResolution.add(normalizedHost)) {
-        log.info("Forced host {} resolved via plugin config -> {}", normalizedHost, explicit);
-      }
-      return explicit;
-    }
+    if (explicit != null) return explicit;
 
     String viaVelocity = findVelocityForcedHost(normalizedHost);
-    if (viaVelocity != null) {
-      if (normalizedHost != null && loggedVelocityResolution.add(normalizedHost)) {
-        log.info("Forced host {} resolved via Velocity config -> {}", normalizedHost, viaVelocity);
-      }
-      return viaVelocity;
-    }
+    if (viaVelocity != null) return viaVelocity;
 
     String primary = sanitizeServerName(cfg.primaryServerName());
-    if (normalizedHost != null) {
-      if (loggedFallbackResolution.add(normalizedHost)) {
-        log.info("Forced host {} not mapped; falling back to primary {}", normalizedHost, primary);
-      }
-    }
     return primary;
   }
 
@@ -615,7 +573,8 @@ public final class PlayerEvents {
     List<String> direct = forced.get(normalizedHost);
     if (direct == null) {
       for (var entry : forced.entrySet()) {
-        if (normalizeHost(entry.getKey()).equals(normalizedHost)) {
+        String normalizedKey = normalizeHost(entry.getKey());
+        if (normalizedKey != null && normalizedKey.equals(normalizedHost)) {
           direct = entry.getValue();
           break;
         }
@@ -639,6 +598,15 @@ public final class PlayerEvents {
   private static String normalizeHost(String host) {
     if (host == null) return null;
     String value = host.trim();
+    int nulIndex = value.indexOf('\0');
+    if (nulIndex >= 0) {
+      value = value.substring(0, nulIndex);
+    }
+    int slashIndex = value.indexOf('/');
+    if (slashIndex >= 0) {
+      value = value.substring(0, slashIndex);
+    }
+    value = value.trim();
     if (value.isEmpty()) return null;
     int colon = value.indexOf(':');
     if (colon >= 0) value = value.substring(0, colon);

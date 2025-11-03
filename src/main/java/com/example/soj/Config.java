@@ -22,11 +22,11 @@ public final class Config {
   public Whitelist whitelist = new Whitelist();
 
   public static final class Motd {
-    public String offline  = "<gray>eli server :3</gray>";
+    public String offline  = "<gray>Your Network</gray> <gray>- <white><server></white></gray>";
     public String offline2 = "<red><bold>Server Offline - Join to Start</bold></red>";
-    public String starting = "<yellow><bold>Server Starting</bold></yellow>";
+    public String starting = "<yellow><bold>Server Starting</bold></yellow> <white><server></white>";
     public String starting2 = "<gray>Please wait...</gray>";
-    public String online   = "<gray>eli server :3</gray>";
+    public String online   = "<gray>Your Network</gray> <gray>- <white><server></white></gray>";
     public String online2  = "<green><bold>Server Online</bold></green>";
   }
 
@@ -84,11 +84,11 @@ public final class Config {
         startupGraceSeconds: 15
         stopGraceSeconds: 60
         motd:
-          offline:  "<gray>Your Network</gray>"
+          offline:  "<gray>Your Network</gray> <gray>- <white><server></white></gray>"
           offline2: "<red><bold>Server Offline - Join to Start</bold></red>"
-          starting: "<yellow><bold>Server Starting</bold></yellow>"
+          starting: "<yellow><bold>Server Starting</bold></yellow> <white><server></white>"
           starting2: "<gray>Please wait...</gray>"
-          online:   "<gray>Your Network</gray>"
+          online:   "<gray>Your Network</gray> <gray>- <white><server></white></gray>"
           online2:  "<green><bold>Server Online</bold></green>"
         messages:
           startingQueued: "<yellow>Starting <white><server></white>… You'll be sent automatically.</yellow>"
