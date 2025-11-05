@@ -8,6 +8,7 @@ import java.util.Map;
 
 public final class ServerProcessManager {
   private final Map<String, ManagedServer> servers = new HashMap<>();
+  private final Map<String, Long> holdUntilMs = new HashMap<>();
   private volatile Config cfg;
   private final Logger log;
 
@@ -33,6 +34,54 @@ public final class ServerProcessManager {
 
   public boolean anyRecentlyStarted(long windowMs) {
     return servers.values().stream().anyMatch(s -> s.recentlyStarted(windowMs));
+  }
+
+  public synchronized long hold(String name, long durationSeconds) {
+    if (durationSeconds <= 0) {
+      holdUntilMs.remove(name);
+      return 0L;
+    }
+    get(name); // validate server exists
+    long now = System.currentTimeMillis();
+    long durationMs;
+    if (durationSeconds > Long.MAX_VALUE / 1000L) {
+      durationMs = Long.MAX_VALUE - now;
+    } else {
+      durationMs = durationSeconds * 1000L;
+      if (durationMs > Long.MAX_VALUE - now) {
+        durationMs = Long.MAX_VALUE - now;
+      }
+    }
+    long expiry = now + durationMs;
+    holdUntilMs.put(name, expiry);
+    return expiry;
+  }
+
+  public synchronized boolean clearHold(String name) {
+    return holdUntilMs.remove(name) != null;
+  }
+
+  public synchronized boolean isHoldActive(String name) {
+    Long until = holdUntilMs.get(name);
+    if (until == null) return false;
+    long now = System.currentTimeMillis();
+    if (until <= now) {
+      holdUntilMs.remove(name);
+      return false;
+    }
+    return true;
+  }
+
+  public synchronized long holdRemainingSeconds(String name) {
+    Long until = holdUntilMs.get(name);
+    if (until == null) return 0L;
+    long now = System.currentTimeMillis();
+    if (until <= now) {
+      holdUntilMs.remove(name);
+      return 0L;
+    }
+    long diff = until - now;
+    return (diff + 999L) / 1000L; // ceiling division to seconds
   }
 
   public synchronized void start(String name) throws IOException { get(name).start(); }
@@ -68,6 +117,7 @@ public final class ServerProcessManager {
 
     servers.clear();
     servers.putAll(updated);
+    holdUntilMs.keySet().retainAll(updated.keySet());
     this.cfg = newCfg;
   }
 

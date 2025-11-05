@@ -8,6 +8,7 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
 - Intercepts `/server <name>` (or GUI menu joins) to launch offline managed servers, keeps the player online, queues the connection, and auto-sends once the ping succeeds.
 - Three-state MOTD (offline/starting/online) driven by MiniMessage templates, including a distinct "starting" banner.
 - Graceful per-server shutdowns when a backend empties, plus a safety stop-all when the entire proxy is empty with optional startup grace.
+- Admin hold command (`/sm hold`) keeps a backend online for a set window even when it is empty.
 - Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
 - Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve web onboarding.
 
@@ -44,6 +45,7 @@ Default file snippets (generated on first run) are shown below. All MiniMessage 
 - `<server>` resolves to the backend name.
 - `<player>` resolves to the player username (where applicable).
 - `<state>` is available for status messages.
+- `<duration>` is used by hold notifications to display the remaining pin time.
 
 ```yaml
 kickMessage: "Server Starting"
@@ -60,7 +62,13 @@ motd:
 
 messages:
   noPermission:   "<red>You don't have permission.</red>"
-  usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green> [server]</white>"
+  usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>"
+  holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|clear></green></white>"
+  holdSet:        "<green><white><server></white> will stay online for the next <duration>.</green>"
+  holdStatus:     "<gray><white><server></white> hold remaining: <duration>.</gray>"
+  holdCleared:    "<yellow>Hold cleared for <white><server></white>.</yellow>"
+  holdNotActive:  "<gray><white><server></white> is not currently held.</gray>"
+  holdInvalidDuration: "<red>Unknown duration '<duration>'.</red>"
   startingQueued: "<yellow>Starting <white><server></white>… You'll be sent automatically.</yellow>"
   startFailed:    "<red>Failed to start <white><server></white>. Try again.</red>"
   readySending:   "<green><white><server></white> is ready. Sending you now…</green>"
@@ -181,7 +189,10 @@ Root command aliases: `/servermanager`, `/sm`
 | `status`   | `servermanager.command.status` (wildcards supported) | Lists each managed server with an online/offline tag and marks the primary. |
 | `start`    | `servermanager.command.start`               | Boots the named managed server if it is offline. |
 | `stop`     | `servermanager.command.stop`                | Sends the graceful stop command to the backend. |
+| `hold`     | `servermanager.command.hold`                | Keeps the backend running for the requested duration (accepts `30m`, `2h`, `1h30m`, etc.). Starts the server automatically if it is offline. |
 | `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
+
+Durations default to minutes when no unit is supplied. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early.
 
 \* Any of `servermanager.command.*`, `servermanager.*`, or legacy `startonjoin.*` nodes also satisfy the checks. Console sources bypass permission checks automatically.
 

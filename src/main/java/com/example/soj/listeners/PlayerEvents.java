@@ -315,6 +315,10 @@ public final class PlayerEvents {
     if (!mgr.isKnown(serverName)) return;
     if (countPlayersOn(serverName) > 0) return;
     if (pendingServerStop.containsKey(serverName)) return;
+    if (mgr.isHoldActive(serverName)) {
+      log.info("[{}] hold active; skipping auto-stop schedule.", serverName);
+      return;
+    }
 
     int delay = Math.max(0, cfg.stopGraceSeconds);
     log.info("[{}] no players online; scheduling stop in {}s", serverName, delay);
@@ -323,6 +327,10 @@ public final class PlayerEvents {
       pendingServerStop.remove(serverName);
       if (countPlayersOn(serverName) > 0) {
         log.info("[{}] stop skipped; players rejoined.", serverName);
+        return;
+      }
+      if (mgr.isHoldActive(serverName)) {
+        log.info("[{}] auto-stop canceled; hold still active.", serverName);
         return;
       }
       try {
@@ -367,9 +375,20 @@ public final class PlayerEvents {
           return;
         }
 
-        log.info("Proxy empty for {}s; stopping all managed servers...", delaySeconds);
-        mgr.stopAllGracefully();
-        cfg.servers.keySet().forEach(n -> isReadyCache.put(n, Boolean.FALSE));
+        log.info("Proxy empty for {}s; stopping idle managed servers...", delaySeconds);
+        for (String name : cfg.servers.keySet()) {
+          if (mgr.isHoldActive(name)) {
+            log.info("[{}] hold active; skipping proxy-empty stop.", name);
+            continue;
+          }
+          if (!mgr.isRunning(name)) continue;
+          try {
+            mgr.stop(name);
+            isReadyCache.put(name, Boolean.FALSE);
+          } catch (Exception ex) {
+            log.error("Failed to stop server {} during proxy-empty sweep", name, ex);
+          }
+        }
       }).delay(Duration.ofSeconds(delaySeconds)).schedule();
 
       if (startupGraceActive) {
@@ -418,6 +437,10 @@ public final class PlayerEvents {
         player.sendMessage(mm(cfg.messages.timeout, serverName, player.getUsername()));
         // Enforce "no backend without players" if nobody reached it
         if (countPlayersOn(serverName) == 0 && mgr.isRunning(serverName)) {
+          if (mgr.isHoldActive(serverName)) {
+            log.info("[{}] auto-send timeout hit but hold is active; leaving running.", serverName);
+            return;
+          }
           try {
             log.info("[{}] auto-send timeout; no players joined -> stopping.", serverName);
             mgr.stop(serverName);
