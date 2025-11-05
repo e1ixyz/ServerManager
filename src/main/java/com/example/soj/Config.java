@@ -38,12 +38,14 @@ public final class Config {
     public String unknownServer  = "<red>Unknown server <white><server></white>.</red>";
     public String noPermission   = "<red>You don’t have permission.</red>";
     public String usage          = "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>";
+    public String helpHeader     = "<gray>ServerManager commands:</gray>";
     public String holdUsage      = "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|clear></green></white>";
     public String holdSet        = "<green><white><server></white> will stay online for the next <duration>.</green>";
     public String holdStatus     = "<gray><white><server></white> hold remaining: <duration>.</gray>";
     public String holdCleared    = "<yellow>Hold cleared for <white><server></white>.</yellow>";
     public String holdNotActive  = "<gray><white><server></white> is not currently held.</gray>";
     public String holdInvalidDuration = "<red>Unknown duration '<duration>'.</red>";
+    public String holdStatusSuffix = "<gray>(hold: <duration>)</gray>";
     public String reloadSuccess  = "<green>ServerManager reloaded successfully.</green>";
     public String reloadFailed   = "<red>Reload failed. Check console for details.</red>";
     public String notWhitelistedBackend = "<red>You are not whitelisted on <white><server></white>.</red>";
@@ -104,12 +106,14 @@ public final class Config {
           unknownServer:  "<red>Unknown server <white><server></white>.</red>"
           noPermission:   "<red>You don't have permission.</red>"
           usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>"
+          helpHeader:     "<gray>ServerManager commands:</gray>"
           holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|clear></green></white>"
           holdSet:        "<green><white><server></white> will stay online for the next <duration>.</green>"
           holdStatus:     "<gray><white><server></white> hold remaining: <duration>.</gray>"
           holdCleared:    "<yellow>Hold cleared for <white><server></white>.</yellow>"
           holdNotActive:  "<gray><white><server></white> is not currently held.</gray>"
           holdInvalidDuration: "<red>Unknown duration '<duration>'.</red>"
+          holdStatusSuffix: "<gray>(hold: <duration>)</gray>"
           reloadSuccess:  "<green>ServerManager reloaded successfully.</green>"
           reloadFailed:   "<red>Reload failed. Check console for details.</red>"
           notWhitelistedBackend: "<red>You are not whitelisted on <white><server></white>.</red>"

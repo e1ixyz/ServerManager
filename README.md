@@ -63,12 +63,14 @@ motd:
 messages:
   noPermission:   "<red>You don't have permission.</red>"
   usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>"
+  helpHeader:     "<gray>ServerManager commands:</gray>"
   holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|clear></green></white>"
   holdSet:        "<green><white><server></white> will stay online for the next <duration>.</green>"
   holdStatus:     "<gray><white><server></white> hold remaining: <duration>.</gray>"
   holdCleared:    "<yellow>Hold cleared for <white><server></white>.</yellow>"
   holdNotActive:  "<gray><white><server></white> is not currently held.</gray>"
   holdInvalidDuration: "<red>Unknown duration '<duration>'.</red>"
+  holdStatusSuffix: "<gray>(hold: <duration>)</gray>"
   startingQueued: "<yellow>Starting <white><server></white>… You'll be sent automatically.</yellow>"
   startFailed:    "<red>Failed to start <white><server></white>. Try again.</red>"
   readySending:   "<green><white><server></white> is ready. Sending you now…</green>"
@@ -189,6 +191,7 @@ Root command aliases: `/servermanager`, `/sm`
 | `status`   | `servermanager.command.status` (wildcards supported) | Lists each managed server with an online/offline tag and marks the primary. |
 | `start`    | `servermanager.command.start`               | Boots the named managed server if it is offline. |
 | `stop`     | `servermanager.command.stop`                | Sends the graceful stop command to the backend. |
+| `help`     | _None_                                      | Prints the command overview along with `hold` syntax. |
 | `hold`     | `servermanager.command.hold`                | Keeps the backend running for the requested duration (accepts `30m`, `2h`, `1h30m`, etc.). Starts the server automatically if it is offline. |
 | `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
 

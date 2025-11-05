@@ -65,6 +65,14 @@ public final class ServerManagerCmd implements SimpleCommand {
         for (var name : config.servers.keySet()) {
           boolean running = manager.isRunning(name);
           String state = running ? config.messages.stateOnline : config.messages.stateOffline;
+          long holdRemaining = manager.holdRemainingSeconds(name);
+          if (holdRemaining > 0) {
+            String suffix = renderDurationSnippet(config.messages.holdStatusSuffix, holdRemaining);
+            if (!suffix.isBlank()) {
+              if (!state.isBlank() && !state.endsWith(" ")) state = state + " ";
+              state = state + suffix;
+            }
+          }
           src.sendMessage(mmState(config.messages.statusLine, name, state));
         }
       }
@@ -88,6 +96,15 @@ public final class ServerManagerCmd implements SimpleCommand {
         if (!manager.isRunning(server)) { src.sendMessage(mm2(config.messages.alreadyStopped, server, nameOf(src))); return; }
         manager.stop(server);
         src.sendMessage(mm2(config.messages.stopped, server, nameOf(src)));
+      }
+      case "help" -> {
+        if (config.messages.helpHeader != null && !config.messages.helpHeader.isBlank()) {
+          src.sendMessage(mm0(config.messages.helpHeader));
+        }
+        src.sendMessage(mm0(config.messages.usage));
+        if (config.messages.holdUsage != null && !config.messages.holdUsage.isBlank()) {
+          src.sendMessage(mm0(config.messages.holdUsage));
+        }
       }
       case "hold" -> {
         if (!has(src, "servermanager.command.hold", "servermanager.hold")) {
@@ -302,5 +319,11 @@ public final class ServerManagerCmd implements SimpleCommand {
     if (value <= 0) return;
     if (sb.length() > 0) sb.append(' ');
     sb.append(value).append(suffix);
+  }
+
+  private static String renderDurationSnippet(String template, long seconds) {
+    if (template == null || template.isBlank()) return "";
+    String normalized = normalize(template);
+    return normalized.replace("<duration>", formatDuration(seconds));
   }
 }
