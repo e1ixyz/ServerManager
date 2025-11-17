@@ -61,7 +61,11 @@ public final class VanillaWhitelistChecker {
   }
 
   public boolean hasTargets() {
-    return primaryPath() != null;
+    return !serverFiles.isEmpty();
+  }
+
+  public boolean tracksServer(String server) {
+    return serverFiles.containsKey(server);
   }
 
   /** Networks bypass uses the primary backend only. */
@@ -80,8 +84,14 @@ public final class VanillaWhitelistChecker {
 
   /** Mirrors the network whitelist into the primary backend. */
   public void ensureWhitelisted(UUID uuid, String username) {
-    Path path = primaryPath();
-    if (uuid == null || path == null) return;
+    ensureWhitelisted(this.primaryName, uuid, username);
+  }
+
+  /** Mirrors the network whitelist into a specific backend. */
+  public void ensureWhitelisted(String server, UUID uuid, String username) {
+    if (uuid == null || server == null) return;
+    Path path = serverFiles.get(server);
+    if (path == null) return;
     String name = username == null ? "" : username.trim();
     try {
       if (updateFile(path, uuid, name)) {

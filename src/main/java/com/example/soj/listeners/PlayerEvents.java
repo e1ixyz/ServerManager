@@ -22,6 +22,7 @@ import org.slf4j.Logger;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -51,6 +52,8 @@ public final class PlayerEvents {
   private final VanillaWhitelistChecker vanillaWhitelist;
   private final Config.Whitelist whitelistCfg;
   private final Map<String, Config.ForcedHost> forcedHostOverrides;
+  private final Set<String> vanillaBypassServers;
+  private final Set<String> mirrorNetworkWhitelistServers;
 
   /** Proxy-empty stop-all task */
   private volatile ScheduledTask pendingStopAll;
@@ -100,6 +103,33 @@ public final class PlayerEvents {
           log.info("Registered forced-host override {} -> {}", normalized, target == null ? "<unset>" : target);
         }
       });
+    }
+
+    this.vanillaBypassServers = new HashSet<>();
+    this.mirrorNetworkWhitelistServers = new HashSet<>();
+    boolean globalVanillaBypass = cfg.whitelist != null && cfg.whitelist.allowVanillaBypass;
+    String primary = cfg.primaryServerName();
+    cfg.servers.forEach((name, serverCfg) -> {
+      if (serverCfg == null) return;
+      boolean bypass = (serverCfg.vanillaWhitelistBypassesNetwork != null)
+          ? Boolean.TRUE.equals(serverCfg.vanillaWhitelistBypassesNetwork)
+          : (globalVanillaBypass && name.equals(primary));
+      if (bypass) {
+        vanillaBypassServers.add(name);
+      }
+
+      boolean mirror = (serverCfg.mirrorNetworkWhitelist != null)
+          ? Boolean.TRUE.equals(serverCfg.mirrorNetworkWhitelist)
+          : name.equals(primary);
+      if (mirror) {
+        mirrorNetworkWhitelistServers.add(name);
+      }
+    });
+    if (!vanillaBypassServers.isEmpty()) {
+      log.info("Vanilla whitelist bypass enabled for: {}", vanillaBypassServers);
+    }
+    if (!mirrorNetworkWhitelistServers.isEmpty()) {
+      log.info("Network whitelist entries will mirror to: {}", mirrorNetworkWhitelistServers);
     }
 
     Map<String, List<String>> velocityHosts = proxy.getConfiguration().getForcedHosts();
@@ -513,16 +543,18 @@ public final class PlayerEvents {
       mirrorToVanilla(uuid, name);
       return true;
     }
-    if (whitelistCfg != null && whitelistCfg.allowVanillaBypass
-        && vanillaWhitelist != null && vanillaWhitelist.hasTargets()
-        && vanillaWhitelist.isWhitelisted(uuid, name)) {
-      try {
-        whitelist.add(uuid, name);
-        mirrorToVanilla(uuid, name);
-      } catch (IOException ex) {
-        log.warn("Failed to mirror vanilla whitelist entry for {}", name, ex);
+    if (vanillaWhitelist != null && !vanillaBypassServers.isEmpty()) {
+      for (String server : vanillaBypassServers) {
+        if (!vanillaWhitelist.tracksServer(server)) continue;
+        if (!vanillaWhitelist.isWhitelisted(server, uuid, name)) continue;
+        try {
+          whitelist.add(uuid, name);
+          mirrorToVanilla(uuid, name);
+        } catch (IOException ex) {
+          log.warn("Failed to mirror vanilla whitelist entry for {}", name, ex);
+        }
+        return true;
       }
-      return true;
     }
     return false;
   }
@@ -559,14 +591,17 @@ public final class PlayerEvents {
   }
 
   private void mirrorToVanilla(UUID uuid, String name) {
-    if (vanillaWhitelist == null) return;
-    vanillaWhitelist.ensureWhitelisted(uuid, name);
-    String primary = mgr.primary();
-    if (primary == null || name == null || name.isBlank()) return;
-    if (!mgr.isRunning(primary)) return;
+    if (vanillaWhitelist == null || mirrorNetworkWhitelistServers.isEmpty()) return;
+    for (String server : mirrorNetworkWhitelistServers) {
+      vanillaWhitelist.ensureWhitelisted(server, uuid, name);
+    }
+    if (name == null || name.isBlank()) return;
     String cmd = "whitelist add " + name;
-    if (!mgr.sendCommand(primary, cmd)) {
-      log.warn("Failed to dispatch '{}' to {} after whitelist sync", cmd, primary);
+    for (String server : mirrorNetworkWhitelistServers) {
+      if (!mgr.isRunning(server)) continue;
+      if (!mgr.sendCommand(server, cmd)) {
+        log.warn("Failed to dispatch '{}' to {} after whitelist sync", cmd, server);
+      }
     }
   }
 

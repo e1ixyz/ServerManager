@@ -133,6 +133,8 @@ public final class Config {
             stopCommand: "stop"
             logToFile: true
             logFile: "logs/proxy-managed-lobby.log"
+            vanillaWhitelistBypassesNetwork: true
+            mirrorNetworkWhitelist: true
           survival:
             startOnJoin: false
             workingDir: "../survival"
@@ -140,6 +142,8 @@ public final class Config {
             stopCommand: "stop"
             logToFile: true
             logFile: "logs/proxy-managed-survival.log"
+            vanillaWhitelistBypassesNetwork: false
+            mirrorNetworkWhitelist: false
         whitelist:
           enabled: false
           bind: "0.0.0.0"

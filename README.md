@@ -93,6 +93,8 @@ servers:
     stopCommand: "stop"
     logToFile: true
     logFile: "logs/proxy-managed-lobby.log"
+    vanillaWhitelistBypassesNetwork: true
+    mirrorNetworkWhitelist: true
 
   survival:
     startOnJoin: false
@@ -101,6 +103,8 @@ servers:
     stopCommand: "stop"
     logToFile: true
     logFile: "logs/proxy-managed-survival.log"
+    vanillaWhitelistBypassesNetwork: false
+    mirrorNetworkWhitelist: false
 
 whitelist:
   enabled: true
@@ -127,9 +131,10 @@ Key points:
 - `startCommand` executes inside `workingDir`. Include `nogui` if you do not want the vanilla GUI.
 - `stopCommand` is written to the server stdin during graceful shutdown (`stop` for Paper).
 - If `logToFile` is true, stdout/stderr is redirected to `logFile`. Paths are resolved relative to `workingDir` when not absolute.
+- Each server entry may set `vanillaWhitelistBypassesNetwork` to grant players on that backend's `whitelist.json` access to the network whitelist automatically, and `mirrorNetworkWhitelist` to push every accepted player back into that backend's vanilla whitelist (including via `/whitelist add` while it is online). When omitted, the primary server keeps the legacy behavior (bypass + mirror) and other servers remain opt-in.
 - `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
 - Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a short URL and one-time code and can redeem it through the built-in HTTP form.
-- `allowVanillaBypass: true` mirrors any UUID found in the primary backend's `whitelist.json` file into the network whitelist the next time that player connects. Set it to `false` if you want the network whitelist to be completely independent.
+- `allowVanillaBypass: true` remains the default for the primary backend when the per-server flag is not set. Set it to `false` if you want even the primary server to ignore its vanilla whitelist entirely.
 
 ## Network Whitelist Flow
 1. Player joins Velocity.
