@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -33,11 +34,80 @@ public final class ServerManagerCmd implements SimpleCommand {
       "servermanager.*",
       "startonjoin.*"
   };
+  private static final MiniMessage MINI = MiniMessage.miniMessage();
+  private static final String[] PERM_STATUS = {"servermanager.command.status", "servermanager.status"};
+  private static final String[] PERM_START = {"servermanager.command.start", "servermanager.start"};
+  private static final String[] PERM_STOP = {"servermanager.command.stop", "servermanager.stop"};
+  private static final String[] PERM_HOLD = {"servermanager.command.hold", "servermanager.hold"};
+  private static final String[] PERM_RELOAD = {"servermanager.command.reload", "servermanager.reload"};
+  private static final String[] PERM_WHITELIST = {"servermanager.command.whitelist", "servermanager.whitelist"};
+  private static final String[] PERM_NETBAN = {"servermanager.command.networkban", "servermanager.networkban"};
+  private static final String[] PERM_HELP = {"servermanager.command.help", "servermanager.help"};
   private static final Pattern DURATION_TOKEN = Pattern.compile("(?i)(\\d+)([dhms]?)");
   private static final String WL_USAGE = "<gray>Usage:</gray> <white>/sm whitelist <green>network</green>|<green>vanilla</green> …</white>";
   private static final String WL_NETWORK_USAGE = "<gray>Usage:</gray> <white>/sm whitelist network <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
   private static final String WL_VANILLA_USAGE = "<gray>Usage:</gray> <white>/sm whitelist vanilla <server> <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
   private static final String NETBAN_USAGE = "<gray>Usage:</gray> <white>/sm networkban <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
+  private static final SubcommandMeta CMD_STATUS = command("status", PERM_STATUS);
+  private static final SubcommandMeta CMD_START = command("start", PERM_START);
+  private static final SubcommandMeta CMD_STOP = command("stop", PERM_STOP);
+  private static final SubcommandMeta CMD_HOLD = command("hold", PERM_HOLD);
+  private static final SubcommandMeta CMD_RELOAD = command("reload", PERM_RELOAD);
+  private static final SubcommandMeta CMD_WHITELIST = command("whitelist", PERM_WHITELIST);
+  private static final SubcommandMeta CMD_NETBAN = command("networkban", PERM_NETBAN, "netban");
+  private static final SubcommandMeta CMD_HELP = command("help", PERM_HELP);
+  private static final List<SubcommandMeta> SUBCOMMANDS = List.of(
+      CMD_STATUS, CMD_START, CMD_STOP, CMD_HOLD, CMD_RELOAD, CMD_WHITELIST, CMD_NETBAN, CMD_HELP
+  );
+  private static final List<HelpEntry> HELP_ENTRIES = List.of(
+      help(CMD_STATUS, "<white>/sm status</white> <gray>- View the state of all managed servers.</gray>"),
+      help(CMD_START, "<white>/sm start [server]</white> <gray>- Start a managed server manually.</gray>"),
+      help(CMD_STOP, "<white>/sm stop [server]</white> <gray>- Stop a running managed server.</gray>"),
+      help(CMD_HOLD, "<white>/sm hold [server] [duration|clear]</white> <gray>- Hold a server online or clear the hold.</gray>"),
+      help(CMD_RELOAD, "<white>/sm reload</white> <gray>- Reload ServerManager config and listeners.</gray>"),
+      help(CMD_WHITELIST, "<white>/sm whitelist network <list|add|remove></white> <gray>- Manage the shared network whitelist.</gray>"),
+      help(CMD_WHITELIST, "<white>/sm whitelist vanilla [server] <list|add|remove></white> <gray>- Manage vanilla whitelist entries per backend.</gray>"),
+      help(CMD_NETBAN, "<white>/sm networkban|netban <list|add|remove></white> <gray>- View or update network bans.</gray>"),
+      help(CMD_HELP, "<white>/sm help</white> <gray>- Show this staff help menu.</gray>")
+  );
+  private static final List<String> HOLD_KEYWORDS = List.of("clear", "cancel", "off", "remove");
+  private static final List<String> WHITELIST_SCOPES = List.of("network", "vanilla");
+  private static final List<String> NETWORK_WL_ACTIONS = List.of("list", "add", "remove", "delete");
+  private static final List<String> VANILLA_WL_ACTIONS = List.of("list", "add", "remove");
+  private static final List<String> NETBAN_ACTIONS = List.of("list", "add", "remove", "delete", "unban");
+  private static SubcommandMeta command(String primary, String[] perms, String... aliases) {
+    List<String> triggers = new ArrayList<>();
+    triggers.add(primary);
+    if (aliases != null && aliases.length > 0) {
+      triggers.addAll(Arrays.asList(aliases));
+    }
+    return new SubcommandMeta(primary, List.copyOf(triggers), perms);
+  }
+
+  private static HelpEntry help(SubcommandMeta command, String template) {
+    return new HelpEntry(command, MINI.deserialize(template));
+  }
+
+  private record SubcommandMeta(String primary, List<String> triggers, String[] perms) {
+    boolean matches(String token) {
+      if (token == null) return false;
+      for (String trigger : triggers) {
+        if (trigger.equalsIgnoreCase(token)) return true;
+      }
+      return false;
+    }
+
+    boolean canUse(CommandSource src) {
+      if (perms == null || perms.length == 0) return true;
+      return ServerManagerCmd.has(src, perms);
+    }
+  }
+
+  private record HelpEntry(SubcommandMeta command, Component line) {
+    boolean visibleTo(CommandSource src) {
+      return command == null || command.canUse(src);
+    }
+  }
   private volatile ServerProcessManager mgr;
   private volatile Config cfg;
   private volatile WhitelistService whitelist;
@@ -339,7 +409,7 @@ public final class ServerManagerCmd implements SimpleCommand {
 
     switch (sub) {
       case "status" -> {
-        if (!has(src, "servermanager.command.status", "servermanager.status")) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        if (!has(src, PERM_STATUS)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
         src.sendMessage(mm0(config.messages.statusHeader));
         for (var name : config.servers.keySet()) {
           boolean running = manager.isRunning(name);
@@ -356,7 +426,7 @@ public final class ServerManagerCmd implements SimpleCommand {
         }
       }
       case "start" -> {
-        if (!has(src, "servermanager.command.start", "servermanager.start")) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        if (!has(src, PERM_START)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
         if (server == null) { src.sendMessage(mm0(config.messages.usage)); return; }
         if (!manager.isKnown(server)) { src.sendMessage(mm2(config.messages.unknownServer, server, nameOf(src))); return; }
         if (manager.isRunning(server)) { src.sendMessage(mm2(config.messages.alreadyRunning, server, nameOf(src))); return; }
@@ -369,7 +439,7 @@ public final class ServerManagerCmd implements SimpleCommand {
         }
       }
       case "stop" -> {
-        if (!has(src, "servermanager.command.stop", "servermanager.stop")) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        if (!has(src, PERM_STOP)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
         if (server == null) { src.sendMessage(mm0(config.messages.usage)); return; }
         if (!manager.isKnown(server)) { src.sendMessage(mm2(config.messages.unknownServer, server, nameOf(src))); return; }
         if (!manager.isRunning(server)) { src.sendMessage(mm2(config.messages.alreadyStopped, server, nameOf(src))); return; }
@@ -377,16 +447,26 @@ public final class ServerManagerCmd implements SimpleCommand {
         src.sendMessage(mm2(config.messages.stopped, server, nameOf(src)));
       }
       case "help" -> {
+        if (!has(src, PERM_HELP)) {
+          src.sendMessage(mm0(config.messages.noPermission));
+          return;
+        }
         if (config.messages.helpHeader != null && !config.messages.helpHeader.isBlank()) {
           src.sendMessage(mm0(config.messages.helpHeader));
         }
-        src.sendMessage(mm0(config.messages.usage));
-        if (config.messages.holdUsage != null && !config.messages.holdUsage.isBlank()) {
-          src.sendMessage(mm0(config.messages.holdUsage));
+        boolean any = false;
+        for (HelpEntry entry : HELP_ENTRIES) {
+          if (entry.visibleTo(src)) {
+            src.sendMessage(entry.line());
+            any = true;
+          }
+        }
+        if (!any) {
+          src.sendMessage(mm0("<gray>No commands available for your permissions.</gray>"));
         }
       }
       case "hold" -> {
-        if (!has(src, "servermanager.command.hold", "servermanager.hold")) {
+        if (!has(src, PERM_HOLD)) {
           src.sendMessage(mm0(config.messages.noPermission));
           return;
         }
@@ -452,7 +532,7 @@ public final class ServerManagerCmd implements SimpleCommand {
         src.sendMessage(mmDuration(firstNonBlank(config.messages.holdSet, config.messages.holdStatus), server, playerName, formatDuration(remaining)));
       }
       case "reload" -> {
-        if (!has(src, "servermanager.command.reload", "servermanager.reload")) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        if (!has(src, PERM_RELOAD)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
         Config previous = config;
         boolean ok = plugin.reload();
         Config after = this.cfg != null ? this.cfg : previous;
@@ -463,14 +543,14 @@ public final class ServerManagerCmd implements SimpleCommand {
         src.sendMessage(mm0(msg));
       }
       case "whitelist" -> {
-        if (!has(src, "servermanager.command.whitelist", "servermanager.whitelist")) {
+        if (!has(src, PERM_WHITELIST)) {
           src.sendMessage(mm0(config.messages.noPermission));
           return;
         }
         handleWhitelistCommand(src, tail(args, 1));
       }
       case "networkban", "netban" -> {
-        if (!has(src, "servermanager.command.networkban", "servermanager.networkban")) {
+        if (!has(src, PERM_NETBAN)) {
           src.sendMessage(mm0(config.messages.noPermission));
           return;
         }
@@ -478,6 +558,178 @@ public final class ServerManagerCmd implements SimpleCommand {
       }
       default -> src.sendMessage(mm0(config.messages.usage));
     }
+  }
+
+  @Override
+  public List<String> suggest(Invocation invocation) {
+    var src = invocation.source();
+    var args = invocation.arguments();
+    if (mgr == null || cfg == null) return List.of();
+
+    if (args.length == 0) {
+      return suggestSubcommands(src, "");
+    }
+    if (args.length == 1) {
+      return suggestSubcommands(src, args[0]);
+    }
+
+    SubcommandMeta meta = findSubcommand(args[0]);
+    if (meta == null || !meta.canUse(src)) {
+      return List.of();
+    }
+    String canonical = meta.primary();
+
+    return switch (canonical) {
+      case "start" -> suggestServers(args[1]);
+      case "stop" -> suggestServers(args[1]);
+      case "hold" -> suggestHold(args);
+      case "whitelist" -> suggestWhitelist(args);
+      case "networkban" -> suggestNetworkBan(args);
+      case "status", "reload", "help" -> List.of();
+      default -> List.of();
+    };
+  }
+
+  private List<String> suggestSubcommands(CommandSource src, String partial) {
+    String lower = partial == null ? "" : partial.toLowerCase(Locale.ROOT);
+    List<String> matches = new ArrayList<>();
+    for (SubcommandMeta meta : SUBCOMMANDS) {
+      if (!meta.canUse(src)) continue;
+      for (String trigger : meta.triggers()) {
+        if (lower.isEmpty() || trigger.toLowerCase(Locale.ROOT).startsWith(lower)) {
+          matches.add(trigger);
+        }
+      }
+    }
+    matches.sort(String.CASE_INSENSITIVE_ORDER);
+    return matches;
+  }
+
+  private static SubcommandMeta findSubcommand(String token) {
+    if (token == null) return null;
+    for (SubcommandMeta meta : SUBCOMMANDS) {
+      if (meta.matches(token)) return meta;
+    }
+    return null;
+  }
+
+  private List<String> suggestServers(String partial) {
+    Config config = this.cfg;
+    if (config == null || config.servers == null || config.servers.isEmpty()) {
+      return List.of();
+    }
+    return filterOptions(config.servers.keySet(), partial);
+  }
+
+  private List<String> suggestVanillaServers(String partial) {
+    VanillaWhitelistChecker checker = this.vanillaWhitelist;
+    if (checker == null || !checker.hasTargets()) {
+      return List.of();
+    }
+    return filterOptions(checker.trackedServers(), partial);
+  }
+
+  private List<String> suggestHold(String[] args) {
+    if (args.length <= 2) {
+      return suggestServers(args.length >= 2 ? args[1] : "");
+    }
+    if (args.length == 3) {
+      return filterOptions(HOLD_KEYWORDS, args[2]);
+    }
+    return List.of();
+  }
+
+  private List<String> suggestWhitelist(String[] args) {
+    if (args.length == 2) {
+      return filterOptions(WHITELIST_SCOPES, args[1]);
+    }
+    if (args.length >= 3) {
+      String scope = args[1];
+      if ("network".equalsIgnoreCase(scope)) {
+        return suggestWhitelistNetwork(args);
+      }
+      if ("vanilla".equalsIgnoreCase(scope)) {
+        return suggestWhitelistVanilla(args);
+      }
+    }
+    return List.of();
+  }
+
+  private List<String> suggestWhitelistNetwork(String[] args) {
+    if (args.length == 3) {
+      return filterOptions(NETWORK_WL_ACTIONS, args[2]);
+    }
+    if (args.length == 4) {
+      String action = args[2];
+      if (equalsIgnoreCase(action, "add", "remove", "delete")) {
+        return suggestOnlinePlayers(args[3]);
+      }
+    }
+    return List.of();
+  }
+
+  private List<String> suggestWhitelistVanilla(String[] args) {
+    if (args.length == 3) {
+      return suggestVanillaServers(args[2]);
+    }
+    if (args.length == 4) {
+      return filterOptions(VANILLA_WL_ACTIONS, args[3]);
+    }
+    if (args.length == 5) {
+      String action = args[3];
+      if (equalsIgnoreCase(action, "add", "remove")) {
+        return suggestOnlinePlayers(args[4]);
+      }
+    }
+    return List.of();
+  }
+
+  private List<String> suggestNetworkBan(String[] args) {
+    if (args.length == 2) {
+      return filterOptions(NETBAN_ACTIONS, args[1]);
+    }
+    if (args.length == 3) {
+      String action = args[1];
+      if (equalsIgnoreCase(action, "add", "remove", "delete", "unban")) {
+        return suggestOnlinePlayers(args[2]);
+      }
+    }
+    return List.of();
+  }
+
+  private List<String> suggestOnlinePlayers(String partial) {
+    Collection<Player> players = proxy.getAllPlayers();
+    if (players == null || players.isEmpty()) {
+      return List.of();
+    }
+    List<String> matches = new ArrayList<>();
+    String lower = partial == null ? "" : partial.toLowerCase(Locale.ROOT);
+    for (Player player : players) {
+      if (player == null) continue;
+      String name = player.getUsername();
+      if (name == null) continue;
+      if (lower.isEmpty() || name.toLowerCase(Locale.ROOT).startsWith(lower)) {
+        matches.add(name);
+      }
+    }
+    matches.sort(String.CASE_INSENSITIVE_ORDER);
+    return matches;
+  }
+
+  private List<String> filterOptions(Collection<? extends String> options, String partial) {
+    if (options == null || options.isEmpty()) {
+      return List.of();
+    }
+    String lower = partial == null ? "" : partial.toLowerCase(Locale.ROOT);
+    List<String> matches = new ArrayList<>();
+    for (String option : options) {
+      if (option == null) continue;
+      if (lower.isEmpty() || option.toLowerCase(Locale.ROOT).startsWith(lower)) {
+        matches.add(option);
+      }
+    }
+    matches.sort(String.CASE_INSENSITIVE_ORDER);
+    return matches;
   }
 
   private static String[] tail(String[] args, int from) {
@@ -572,7 +824,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   }
 
   private static Component mmReason(String template, String player, String reason) {
-    return MiniMessage.miniMessage().deserialize(normalize(template),
+    return MINI.deserialize(normalize(template),
         Placeholder.unparsed("player", player == null ? "" : player),
         Placeholder.unparsed("reason", reason == null ? "" : reason));
   }
@@ -622,24 +874,24 @@ public final class ServerManagerCmd implements SimpleCommand {
   }
 
   private static Component mm0(String template) {
-    return MiniMessage.miniMessage().deserialize(normalize(template));
+    return MINI.deserialize(normalize(template));
   }
 
   private static Component mm2(String template, String server, String player) {
-    return MiniMessage.miniMessage().deserialize(normalize(template),
+    return MINI.deserialize(normalize(template),
         Placeholder.unparsed("server", server == null ? "" : server),
         Placeholder.unparsed("player", player == null ? "" : player));
   }
 
   private static Component mmState(String template, String server, String state) {
-    return MiniMessage.miniMessage().deserialize(normalize(template),
+    return MINI.deserialize(normalize(template),
         Placeholder.unparsed("server", server == null ? "" : server),
         // 'state' may itself contain MiniMessage markup (e.g., <green>online</green>)
         Placeholder.parsed("state", state == null ? "" : state));
   }
 
   private static Component mmDuration(String template, String server, String player, String duration) {
-    return MiniMessage.miniMessage().deserialize(normalize(template),
+    return MINI.deserialize(normalize(template),
         Placeholder.unparsed("server", server == null ? "" : server),
         Placeholder.unparsed("player", player == null ? "" : player),
         Placeholder.unparsed("duration", duration == null ? "" : duration));
