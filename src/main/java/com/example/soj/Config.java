@@ -20,6 +20,7 @@ public final class Config {
   public Map<String, ForcedHost> forcedHosts = new LinkedHashMap<>();
   public Messages messages = new Messages();
   public Whitelist whitelist = new Whitelist();
+  public Banlist banlist = new Banlist();
 
   public static final class Motd {
     public String offline  = "<gray>Your Network</gray> <gray>- <white><server></white></gray>";
@@ -57,6 +58,7 @@ public final class Config {
     public String statusLine     = "<white><server></white>: <state>";
     public String stateOnline    = "<green>online</green>";
     public String stateOffline   = "<red>offline</red>";
+    public String networkBanned  = "<red>You are banned from this network.</red><newline><gray>Reason: <reason></gray>";
   }
 
   public static final class Whitelist {
@@ -83,6 +85,11 @@ public final class Config {
     public Motd motd;
     /** Optional kick message when start-on-join kicks the player. */
     public String kickMessage;
+  }
+
+  public static final class Banlist {
+    public boolean enabled = true;
+    public String dataFile = "network-bans.yml";
   }
 
   public static Config loadOrCreateDefault(Path path, Logger log) throws Exception {
@@ -159,6 +166,9 @@ public final class Config {
           successMessage: "Success! You are now whitelisted. You may rejoin the server."
           failureMessage: "Invalid or expired code. Please try again from in-game."
           buttonText: "Verify & Whitelist"
+        banlist:
+          enabled: true
+          dataFile: "network-bans.yml"
         forcedHosts: {}
         """;
       Files.createDirectories(path.getParent());
@@ -190,6 +200,7 @@ public final class Config {
     if (cfg.motd == null) cfg.motd = new Motd();
     if (cfg.messages == null) cfg.messages = new Messages();
     if (cfg.whitelist == null) cfg.whitelist = new Whitelist();
+    if (cfg.banlist == null) cfg.banlist = new Banlist();
     if (cfg.forcedHosts == null) cfg.forcedHosts = new LinkedHashMap<>();
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;

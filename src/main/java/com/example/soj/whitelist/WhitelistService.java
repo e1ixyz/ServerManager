@@ -79,13 +79,41 @@ public final class WhitelistService {
   public synchronized Entry add(UUID uuid, String username) throws IOException {
     long now = System.currentTimeMillis();
     Entry entry = new Entry(uuid, username, now);
-    entriesByUuid.put(uuid, entry);
+    Entry previous = entriesByUuid.put(uuid, entry);
+    if (previous != null && previous.lastKnownName() != null && !previous.lastKnownName().isBlank()) {
+      entriesByName.remove(previous.lastKnownName().toLowerCase(Locale.ROOT));
+    }
     if (username != null && !username.isBlank()) {
       entriesByName.put(username.toLowerCase(Locale.ROOT), entry);
     }
     persist();
     log.info("Whitelist entry added for {} ({})", username, uuid);
     return entry;
+  }
+
+  public synchronized boolean remove(UUID uuid, String username) throws IOException {
+    boolean changed = false;
+    if (uuid != null) {
+      Entry removed = entriesByUuid.remove(uuid);
+      if (removed != null) {
+        changed = true;
+        if (removed.lastKnownName() != null && !removed.lastKnownName().isBlank()) {
+          entriesByName.remove(removed.lastKnownName().toLowerCase(Locale.ROOT));
+        }
+      }
+    }
+    if (!changed && username != null && !username.isBlank()) {
+      Entry removed = entriesByName.remove(username.toLowerCase(Locale.ROOT));
+      if (removed != null) {
+        entriesByUuid.remove(removed.uuid());
+        changed = true;
+      }
+    }
+    if (changed) {
+      persist();
+      log.info("Whitelist entry removed for {}", username != null ? username : uuid);
+    }
+    return changed;
   }
 
   public PendingCode issueCode(UUID uuid, String username) {

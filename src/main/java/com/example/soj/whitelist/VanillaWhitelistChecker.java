@@ -38,7 +38,7 @@ public final class VanillaWhitelistChecker {
   private final String primaryName;
 
   private record Cache(long lastModified, Set<UUID> uuids, Set<String> namesWithoutUuid) {}
-  private record Entry(UUID uuid, String name) {}
+  public record VanillaEntry(UUID uuid, String name) {}
 
   public VanillaWhitelistChecker(Config cfg, Logger log) {
     this.log = log;
@@ -68,6 +68,10 @@ public final class VanillaWhitelistChecker {
     return serverFiles.containsKey(server);
   }
 
+  public Set<String> trackedServers() {
+    return Set.copyOf(serverFiles.keySet());
+  }
+
   /** Networks bypass uses the primary backend only. */
   public boolean isWhitelisted(UUID uuid, String username) {
     Path path = primaryPath();
@@ -94,12 +98,34 @@ public final class VanillaWhitelistChecker {
     if (path == null) return;
     String name = username == null ? "" : username.trim();
     try {
-      if (updateFile(path, uuid, name)) {
+      if (ensureEntry(path, uuid, name)) {
         cache.remove(path);
       }
     } catch (IOException ex) {
       log.warn("Failed to update vanilla whitelist {}", path.toString().replace('\\','/'), ex);
     }
+  }
+
+  public synchronized boolean addEntry(String server, UUID uuid, String username) throws IOException {
+    Path path = serverFiles.get(server);
+    if (path == null) throw new IllegalArgumentException("Unknown server: " + server);
+    boolean changed = ensureEntry(path, uuid, username == null ? "" : username);
+    if (changed) cache.remove(path);
+    return changed;
+  }
+
+  public synchronized boolean removeEntry(String server, UUID uuid, String username) throws IOException {
+    Path path = serverFiles.get(server);
+    if (path == null) throw new IllegalArgumentException("Unknown server: " + server);
+    boolean changed = removeEntry(path, uuid, username);
+    if (changed) cache.remove(path);
+    return changed;
+  }
+
+  public List<VanillaEntry> listEntries(String server) throws IOException {
+    Path path = serverFiles.get(server);
+    if (path == null) throw new IllegalArgumentException("Unknown server: " + server);
+    return List.copyOf(readEntries(path));
   }
 
   private Path primaryPath() {
@@ -129,7 +155,7 @@ public final class VanillaWhitelistChecker {
       Object parsed = yaml.load(raw);
       Set<UUID> uuids = new HashSet<>();
       Set<String> namesWithoutUuid = new HashSet<>();
-      for (Entry entry : readEntries(parsed)) {
+      for (VanillaEntry entry : readEntries(parsed)) {
         if (entry.uuid() != null) uuids.add(entry.uuid());
         else if (entry.name() != null) namesWithoutUuid.add(entry.name().toLowerCase(Locale.ROOT));
       }
@@ -140,19 +166,26 @@ public final class VanillaWhitelistChecker {
     }
   }
 
-  private boolean updateFile(Path file, UUID uuid, String username) throws IOException {
-    List<Entry> entries = new ArrayList<>(readEntries(file));
+  private boolean ensureEntry(Path file, UUID uuid, String username) throws IOException {
+    List<VanillaEntry> entries = new ArrayList<>(readEntries(file));
     boolean changed = false;
-    boolean exists = entries.stream().anyMatch(e -> uuid.equals(e.uuid()));
+    String normalizedName = username == null ? "" : username;
+    boolean exists;
+    if (uuid != null) {
+      exists = entries.stream().anyMatch(e -> uuid.equals(e.uuid()));
+    } else {
+      exists = !normalizedName.isBlank() && entries.stream().anyMatch(e -> e.name() != null && e.name().equalsIgnoreCase(normalizedName));
+    }
     if (!exists) {
-      entries.add(new Entry(uuid, username.isBlank() ? null : username));
+      String storedName = normalizedName.isBlank() ? null : normalizedName;
+      entries.add(new VanillaEntry(uuid, storedName));
       changed = true;
-    } else if (username != null && !username.isBlank()) {
+    } else if (uuid != null && !normalizedName.isBlank()) {
       boolean updated = false;
       for (int i = 0; i < entries.size(); i++) {
-        Entry e = entries.get(i);
+        VanillaEntry e = entries.get(i);
         if (uuid.equals(e.uuid()) && !Objects.equals(e.name(), username)) {
-          entries.set(i, new Entry(uuid, username));
+          entries.set(i, new VanillaEntry(uuid, normalizedName));
           updated = true;
         }
       }
@@ -164,8 +197,23 @@ public final class VanillaWhitelistChecker {
     return changed;
   }
 
-  private List<Entry> readEntries(Path file) throws IOException {
-    List<Entry> entries = new ArrayList<>();
+  private boolean removeEntry(Path file, UUID uuid, String username) throws IOException {
+    List<VanillaEntry> entries = new ArrayList<>(readEntries(file));
+    boolean changed = entries.removeIf(e -> {
+      if (uuid != null && uuid.equals(e.uuid())) return true;
+      if (username != null && !username.isBlank() && e.name() != null) {
+        return e.name().equalsIgnoreCase(username);
+      }
+      return false;
+    });
+    if (changed) {
+      writeEntries(file, entries);
+    }
+    return changed;
+  }
+
+  private List<VanillaEntry> readEntries(Path file) throws IOException {
+    List<VanillaEntry> entries = new ArrayList<>();
     if (!Files.exists(file)) {
       return entries;
     }
@@ -175,25 +223,25 @@ public final class VanillaWhitelistChecker {
     return entries;
   }
 
-  private List<Entry> readEntries(Object parsed) {
-    List<Entry> entries = new ArrayList<>();
+  private List<VanillaEntry> readEntries(Object parsed) {
+    List<VanillaEntry> entries = new ArrayList<>();
     if (parsed instanceof Iterable<?> iterable) {
       for (Object obj : iterable) {
         if (!(obj instanceof Map<?, ?> map)) continue;
         UUID uuid = parseUuid(map.get("uuid"));
         String name = stringOrNull(map.get("name"));
-        entries.add(new Entry(uuid, name));
+        entries.add(new VanillaEntry(uuid, name));
       }
     }
     return entries;
   }
 
-  private void writeEntries(Path file, List<Entry> entries) throws IOException {
+  private void writeEntries(Path file, List<VanillaEntry> entries) throws IOException {
     Files.createDirectories(file.getParent());
     StringBuilder sb = new StringBuilder();
     sb.append("[\n");
     for (int i = 0; i < entries.size(); i++) {
-      Entry e = entries.get(i);
+      VanillaEntry e = entries.get(i);
       sb.append("  {");
       if (e.uuid() != null) {
         sb.append("\"uuid\": \"").append(e.uuid()).append('\"');

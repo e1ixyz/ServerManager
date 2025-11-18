@@ -2,6 +2,7 @@ package com.example.soj;
 
 import com.example.soj.listeners.PlayerEvents;
 import com.example.soj.commands.ServerManagerCmd;
+import com.example.soj.bans.NetworkBanService;
 import com.example.soj.whitelist.WhitelistHttpServer;
 import com.example.soj.whitelist.WhitelistService;
 import com.example.soj.whitelist.VanillaWhitelistChecker;
@@ -16,6 +17,7 @@ import org.slf4j.Logger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.UUID;
 
 @Plugin(
   id = "servermanager",
@@ -34,6 +36,7 @@ public final class ServerManagerPlugin {
   private WhitelistService whitelistService;
   private WhitelistHttpServer whitelistHttpServer;
   private VanillaWhitelistChecker vanillaWhitelist;
+  private NetworkBanService networkBanService;
   private PlayerEvents playerEvents;
   private ServerManagerCmd rootCommand;
 
@@ -54,7 +57,8 @@ public final class ServerManagerPlugin {
       // Root command: /servermanager and alias /sm
       var cm = proxy.getCommandManager();
       var meta = cm.metaBuilder("servermanager").aliases("sm").plugin(this).build();
-      this.rootCommand = new ServerManagerCmd(this, processManager, config, logger);
+      this.rootCommand = new ServerManagerCmd(this, proxy, logger);
+      this.rootCommand.updateState(processManager, config, whitelistService, vanillaWhitelist, networkBanService);
       cm.register(meta, rootCommand);
 
       logger.info("ServerManager initialized. Primary: {}", config.primaryServerName());
@@ -135,12 +139,26 @@ public final class ServerManagerPlugin {
     this.config = newConfig;
     this.whitelistService = new WhitelistService(newConfig.whitelist, logger, dataDir);
     this.vanillaWhitelist = new VanillaWhitelistChecker(newConfig, logger);
+    this.networkBanService = new NetworkBanService(newConfig.banlist, logger, dataDir);
     this.whitelistHttpServer = new WhitelistHttpServer(newConfig.whitelist, logger, whitelistService);
     this.whitelistHttpServer.start();
-    this.playerEvents = new PlayerEvents(this, proxy, newConfig, processManager, logger, whitelistService, vanillaWhitelist);
+    this.playerEvents = new PlayerEvents(this, proxy, newConfig, processManager, logger,
+        whitelistService, vanillaWhitelist, networkBanService);
     proxy.getEventManager().register(this, playerEvents);
     if (rootCommand != null) {
-      rootCommand.updateState(processManager, newConfig);
+      rootCommand.updateState(processManager, newConfig, whitelistService, vanillaWhitelist, networkBanService);
+    }
+  }
+
+  public void mirrorNetworkWhitelistEntry(UUID uuid, String name) {
+    if (playerEvents != null) {
+      playerEvents.mirrorToVanilla(uuid, name);
+    }
+  }
+
+  public void removeNetworkWhitelistEntry(UUID uuid, String name) {
+    if (playerEvents != null) {
+      playerEvents.removeFromMirrors(uuid, name);
     }
   }
 }

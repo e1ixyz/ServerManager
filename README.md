@@ -11,6 +11,7 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
 - Admin hold command (`/sm hold`) keeps a backend online for a set window even when it is empty.
 - Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
 - Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve web onboarding.
+- In-game `/sm whitelist` tooling to view/add/remove entries from both the network whitelist and any managed vanilla `whitelist.json`, plus `/sm networkban` to enforce proxy-wide bans so blocked players can't even wake backend servers.
 
 ## Requirements
 - Java 17+
@@ -84,6 +85,7 @@ messages:
   statusLine:     "<white><server></white>: <state>"
   stateOnline:    "<green>online</green>"
   stateOffline:   "<red>offline</red>"
+  networkBanned:  "<red>You are banned from this network.</red><newline><gray>Reason: <reason></gray>"
 
 servers:
   lobby:
@@ -122,6 +124,10 @@ whitelist:
   failureMessage: "Invalid or expired code. Please try again from in-game."
   buttonText: "Verify & Whitelist"
 
+banlist:
+  enabled: true
+  dataFile: "network-bans.yml"
+
 forcedHosts: {}
 ```
 
@@ -135,6 +141,7 @@ Key points:
 - `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
 - Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a short URL and one-time code and can redeem it through the built-in HTTP form.
 - `allowVanillaBypass: true` remains the default for the primary backend when the per-server flag is not set. Set it to `false` if you want even the primary server to ignore its vanilla whitelist entirely.
+- `banlist:` controls the proxy-level network ban registry used by `/sm networkban`. When `enabled` is true (default) banned players are denied before backend processes even start. Change `dataFile` to relocate the YAML store.
 
 ## Network Whitelist Flow
 1. Player joins Velocity.
@@ -199,6 +206,8 @@ Root command aliases: `/servermanager`, `/sm`
 | `help`     | _None_                                      | Prints the command overview along with `hold` syntax. |
 | `hold`     | `servermanager.command.hold`                | Keeps the backend running for the requested duration (accepts `30m`, `2h`, `1h30m`, etc.). Starts the server automatically if it is offline. |
 | `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
+| `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`. |
+| `networkban` | `servermanager.command.networkban`        | Lists bans and adds/removes proxy-wide bans so blocked players can't start backend servers. |
 
 Durations default to minutes when no unit is supplied. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early.
 
@@ -208,6 +217,16 @@ Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for 
 
 `/sm reload` refreshes the plugin runtime and whitelist services without interrupting running managed servers. Only servers removed from the configuration are stopped during the reload.
 
+### Whitelist management (`/sm whitelist`)
+- `network list` shows the first 20 entries in `network-whitelist.yml` (with a count of any remaining). Use `network add <player|uuid> [name]` to add an online player or explicit UUID, and `network remove <player|uuid>` to revoke access. Adding a player mirrors them into every server that sets `mirrorNetworkWhitelist: true`.
+- `vanilla <server> list` dumps the current contents of that backend's `whitelist.json`. `vanilla <server> add <player|uuid> [name]` accepts either a UUID/online player or just a username (UUID preferred). Removals accept UUIDs or names as well, and active backends also receive a live `/whitelist add|remove ...` command for immediate effect.
+- UUID arguments may omit dashes. When only a UUID is supplied the plugin tries to reuse the last known username from the network whitelist, ban list, or live player list.
+
+### Network bans (`/sm networkban`)
+- `list` shows the most recent bans (20 at a time) along with their stored reason.
+- `add <player|uuid> [reason…]` writes the entry to `network-bans.yml`, removes the user from the network + mirrored vanilla whitelists, and disconnects them immediately if they are online. Banned players are rejected at login before backend servers start.
+- `remove <player|uuid>` deletes the ban entry.
+
 ## Logging
 - Velocity logs key lifecycle actions: process starts, stop scheduling, cancellations, timeouts, and migration messages.
 - When `logToFile` is enabled, backend stdout/stderr is piped to the configured file and not echoed to the proxy console.
@@ -216,7 +235,7 @@ Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for 
 - **Config refuses to load**: Ensure `servers:` contains at least one entry and exactly one has `startOnJoin: true`.
 - **MOTD always offline**: Confirm the primary backend is registered with Velocity and reachable; successful pings are required before the MOTD flips to "online".
 - **Player stuck waiting**: Check backend logs for boot errors. If the process starts but never replies to pings, the auto-connect poller will eventually time out.
-- **Backends never stop**: Confirm `stopGraceSeconds` is set, that players actually disconnect, and that the stop command is correct. If you disable `logToFile`, watch the Velocity console for stop warnings.
+- **Backends never stop**: Confirm `stopGraceSeconds` is set, that players actually disconnect, no admin hold is active, and that the stop command is correct. A background sweep now re-schedules stops for empty-but-running backends, so persistent stragglers will log a warning in the Velocity console (especially when `logToFile` is disabled).
 
 ## Development Notes
 - Package namespace defaults to `com.example.soj`. Rename the package and update build files if you fork.

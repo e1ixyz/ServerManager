@@ -2,6 +2,7 @@ package com.example.soj.listeners;
 
 import com.example.soj.Config;
 import com.example.soj.ServerProcessManager;
+import com.example.soj.bans.NetworkBanService;
 import com.example.soj.whitelist.VanillaWhitelistChecker;
 import com.example.soj.whitelist.WhitelistService;
 import com.velocitypowered.api.event.Subscribe;
@@ -50,6 +51,7 @@ public final class PlayerEvents {
   private final Logger log;
   private final WhitelistService whitelist;
   private final VanillaWhitelistChecker vanillaWhitelist;
+  private final NetworkBanService networkBans;
   private final Config.Whitelist whitelistCfg;
   private final Map<String, Config.ForcedHost> forcedHostOverrides;
   private final Set<String> vanillaBypassServers;
@@ -83,7 +85,8 @@ public final class PlayerEvents {
       ServerProcessManager mgr,
       Logger log,
       WhitelistService whitelist,
-      VanillaWhitelistChecker vanillaWhitelist
+      VanillaWhitelistChecker vanillaWhitelist,
+      NetworkBanService networkBans
   ) {
     this.pluginOwner = pluginOwner;
     this.proxy = proxy;
@@ -92,6 +95,7 @@ public final class PlayerEvents {
     this.log = log;
     this.whitelist = whitelist;
     this.vanillaWhitelist = vanillaWhitelist;
+    this.networkBans = networkBans;
     this.whitelistCfg = (whitelist != null) ? whitelist.config() : null;
     this.forcedHostOverrides = new HashMap<>();
     if (cfg.forcedHosts != null) {
@@ -147,6 +151,9 @@ public final class PlayerEvents {
         if (!mgr.isRunning(name)) {
           isReadyCache.put(name, Boolean.FALSE);
           continue;
+        }
+        if (countPlayersOn(name) == 0 && !mgr.isHoldActive(name)) {
+          scheduleStopIfServerEmpty(name);
         }
         proxy.getServer(name).ifPresent(rs -> rs.ping().whenComplete((ok, err) -> {
           isReadyCache.put(name, err == null);
@@ -211,6 +218,11 @@ public final class PlayerEvents {
     Player joining = e.getPlayer();
     cancelPendingConnect(joining.getUniqueId()); // clear any previous wait
 
+    if (isNetworkBanned(joining, true)) {
+      e.setResult(LoginEvent.ComponentResult.denied(Component.empty()));
+      return;
+    }
+
     if (!hasNetworkAccess(joining)) {
       handleNotWhitelisted(joining, true);
       e.setResult(LoginEvent.ComponentResult.denied(Component.empty()));
@@ -227,6 +239,10 @@ public final class PlayerEvents {
     if (!mgr.isKnown(target)) return; // only manage servers present in our config
 
     Player player = event.getPlayer();
+    if (isNetworkBanned(player, true)) {
+      event.setResult(ServerPreConnectEvent.ServerResult.denied());
+      return;
+    }
     String primary = cfg.primaryServerName();
     boolean running = mgr.isRunning(target);
     boolean isPrimary = target.equals(primary);
@@ -536,6 +552,9 @@ public final class PlayerEvents {
   }
 
   private boolean hasNetworkAccess(Player player) {
+    if (isNetworkBanned(player, true)) {
+      return false;
+    }
     if (!whitelistEnabled()) return true;
     UUID uuid = player.getUniqueId();
     String name = player.getUsername();
@@ -590,7 +609,22 @@ public final class PlayerEvents {
     return whitelist != null && whitelist.enabled();
   }
 
-  private void mirrorToVanilla(UUID uuid, String name) {
+  private boolean isNetworkBanned(Player player, boolean disconnect) {
+    if (networkBans == null || !networkBans.enabled()) return false;
+    var entry = networkBans.lookup(player.getUniqueId(), player.getUsername());
+    if (entry.isEmpty()) return false;
+    Component msg = mmReason(firstNonBlank(cfg.messages.networkBanned, "<red>You are banned from this network.</red>"),
+        player.getUsername(), entry.get().reason());
+    if (disconnect) {
+      player.disconnect(msg);
+    } else {
+      player.sendMessage(msg);
+    }
+    log.info("Denied {} (network banned).", player.getUsername());
+    return true;
+  }
+
+  public void mirrorToVanilla(UUID uuid, String name) {
     if (vanillaWhitelist == null || mirrorNetworkWhitelistServers.isEmpty()) return;
     for (String server : mirrorNetworkWhitelistServers) {
       vanillaWhitelist.ensureWhitelisted(server, uuid, name);
@@ -601,6 +635,25 @@ public final class PlayerEvents {
       if (!mgr.isRunning(server)) continue;
       if (!mgr.sendCommand(server, cmd)) {
         log.warn("Failed to dispatch '{}' to {} after whitelist sync", cmd, server);
+      }
+    }
+  }
+
+  public void removeFromMirrors(UUID uuid, String name) {
+    if (vanillaWhitelist == null || mirrorNetworkWhitelistServers.isEmpty()) return;
+    for (String server : mirrorNetworkWhitelistServers) {
+      try {
+        vanillaWhitelist.removeEntry(server, uuid, name);
+      } catch (IOException ex) {
+        log.warn("Failed to remove whitelist entry from {}", server, ex);
+      }
+    }
+    if (name == null || name.isBlank()) return;
+    String cmd = "whitelist remove " + name;
+    for (String server : mirrorNetworkWhitelistServers) {
+      if (!mgr.isRunning(server)) continue;
+      if (!mgr.sendCommand(server, cmd)) {
+        log.warn("Failed to dispatch '{}' to {} after whitelist removal", cmd, server);
       }
     }
   }
@@ -678,7 +731,8 @@ public final class PlayerEvents {
     return s
         .replace("{server}", "<server>").replace("(server)", "<server>")
         .replace("{player}", "<player>").replace("(player)", "<player>")
-        .replace("{state}", "<state>").replace("(state)", "<state>");
+        .replace("{state}", "<state>").replace("(state)", "<state>")
+        .replace("{reason}", "<reason>").replace("(reason)", "<reason>");
   }
 
   private static String firstNonBlank(String... options) {
@@ -694,6 +748,13 @@ public final class PlayerEvents {
     return MiniMessage.miniMessage().deserialize(t,
         Placeholder.unparsed("server", server == null ? "" : server),
         Placeholder.unparsed("player", player == null ? "" : player));
+  }
+
+  private static Component mmReason(String template, String player, String reason) {
+    String t = normalizePlaceholders(template);
+    return MiniMessage.miniMessage().deserialize(t,
+        Placeholder.unparsed("player", player == null ? "" : player),
+        Placeholder.unparsed("reason", reason == null ? "" : reason));
   }
 
   public void shutdown() {
