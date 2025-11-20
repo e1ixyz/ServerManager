@@ -63,8 +63,10 @@ public final class WhitelistService {
   }
 
   public Optional<Entry> lookup(UUID uuid, String username) {
-    Entry byUuid = entriesByUuid.get(uuid);
-    if (byUuid != null) return Optional.of(byUuid);
+    if (uuid != null) {
+      Entry byUuid = entriesByUuid.get(uuid);
+      if (byUuid != null) return Optional.of(byUuid);
+    }
     if (username != null && !username.isBlank()) {
       Entry byName = entriesByName.get(username.toLowerCase(Locale.ROOT));
       if (byName != null) return Optional.of(byName);
