@@ -63,12 +63,14 @@ public final class WhitelistService {
   }
 
   public Optional<Entry> lookup(UUID uuid, String username) {
-    if (uuid != null) {
-      Entry byUuid = entriesByUuid.get(uuid);
+    UUID id = uuid;
+    String normalizedName = normalize(username);
+    if (id != null) {
+      Entry byUuid = entriesByUuid.get(id);
       if (byUuid != null) return Optional.of(byUuid);
     }
-    if (username != null && !username.isBlank()) {
-      Entry byName = entriesByName.get(username.toLowerCase(Locale.ROOT));
+    if (normalizedName != null) {
+      Entry byName = entriesByName.get(normalizedName);
       if (byName != null) return Optional.of(byName);
     }
     return Optional.empty();
@@ -104,8 +106,9 @@ public final class WhitelistService {
         }
       }
     }
-    if (!changed && username != null && !username.isBlank()) {
-      Entry removed = entriesByName.remove(username.toLowerCase(Locale.ROOT));
+    String normalizedName = normalize(username);
+    if (!changed && normalizedName != null) {
+      Entry removed = entriesByName.remove(normalizedName);
       if (removed != null) {
         entriesByUuid.remove(removed.uuid());
         changed = true;
@@ -255,5 +258,12 @@ public final class WhitelistService {
       sb.append(rng.nextInt(10));
     }
     return sb.toString();
+  }
+
+  private String normalize(String name) {
+    if (name == null) return null;
+    String trimmed = name.trim();
+    if (trimmed.isEmpty()) return null;
+    return trimmed.toLowerCase(Locale.ROOT);
   }
 }
