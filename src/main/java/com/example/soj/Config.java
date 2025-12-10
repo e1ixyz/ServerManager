@@ -40,7 +40,7 @@ public final class Config {
     public String noPermission   = "<red>You don’t have permission.</red>";
     public String usage          = "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>";
     public String helpHeader     = "<gray>ServerManager commands:</gray>";
-    public String holdUsage      = "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|clear></green></white>";
+    public String holdUsage      = "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|forever|clear></green></white>";
     public String holdSet        = "<green><white><server></white> will stay online for the next <duration>.</green>";
     public String holdStatus     = "<gray><white><server></white> hold remaining: <duration>.</gray>";
     public String holdCleared    = "<yellow>Hold cleared for <white><server></white>.</yellow>";
@@ -114,7 +114,7 @@ public final class Config {
           noPermission:   "<red>You don't have permission.</red>"
           usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>"
           helpHeader:     "<gray>ServerManager commands:</gray>"
-          holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|clear></green></white>"
+          holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|forever|clear></green></white>"
           holdSet:        "<green><white><server></white> will stay online for the next <duration>.</green>"
           holdStatus:     "<gray><white><server></white> hold remaining: <duration>.</gray>"
           holdCleared:    "<yellow>Hold cleared for <white><server></white>.</yellow>"

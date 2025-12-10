@@ -260,6 +260,8 @@ public final class PlayerEvents {
       }
     } else {
       if (vanillaWhitelist != null
+          && vanillaWhitelist.tracksServer(target)
+          && vanillaWhitelist.isWhitelistEnabled(target)
           && !vanillaWhitelist.isWhitelisted(target, player.getUniqueId(), player.getUsername())) {
         event.setResult(ServerPreConnectEvent.ServerResult.denied());
         player.sendMessage(mm(cfg.messages.notWhitelistedBackend, target, player.getUsername()));

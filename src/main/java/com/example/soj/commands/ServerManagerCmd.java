@@ -44,9 +44,10 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final String[] PERM_NETBAN = {"servermanager.command.networkban", "servermanager.networkban"};
   private static final String[] PERM_HELP = {"servermanager.command.help", "servermanager.help"};
   private static final Pattern DURATION_TOKEN = Pattern.compile("(?i)(\\d+)([dhms]?)");
+  private static final long HOLD_FOREVER = Long.MAX_VALUE;
   private static final String WL_USAGE = "<gray>Usage:</gray> <white>/sm whitelist <green>network</green>|<green>vanilla</green> …</white>";
   private static final String WL_NETWORK_USAGE = "<gray>Usage:</gray> <white>/sm whitelist network <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
-  private static final String WL_VANILLA_USAGE = "<gray>Usage:</gray> <white>/sm whitelist vanilla <server> <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
+  private static final String WL_VANILLA_USAGE = "<gray>Usage:</gray> <white>/sm whitelist vanilla <server> <green>list</green>|<green>add</green>|<green>remove</green>|<green>on</green>|<green>off</green>|<green>status</green> …</white>";
   private static final String NETBAN_USAGE = "<gray>Usage:</gray> <white>/sm networkban <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
   private static final SubcommandMeta CMD_STATUS = command("status", PERM_STATUS);
   private static final SubcommandMeta CMD_START = command("start", PERM_START);
@@ -63,17 +64,18 @@ public final class ServerManagerCmd implements SimpleCommand {
       help(CMD_STATUS, "<white>/sm status</white> <gray>- View the state of all managed servers.</gray>"),
       help(CMD_START, "<white>/sm start [server]</white> <gray>- Start a managed server manually.</gray>"),
       help(CMD_STOP, "<white>/sm stop [server]</white> <gray>- Stop a running managed server.</gray>"),
-      help(CMD_HOLD, "<white>/sm hold [server] [duration|clear]</white> <gray>- Hold a server online or clear the hold.</gray>"),
+      help(CMD_HOLD, "<white>/sm hold [server] [duration|forever|clear]</white> <gray>- Hold a server online or clear the hold.</gray>"),
       help(CMD_RELOAD, "<white>/sm reload</white> <gray>- Reload ServerManager config and listeners.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist network <list|add|remove></white> <gray>- Manage the shared network whitelist.</gray>"),
-      help(CMD_WHITELIST, "<white>/sm whitelist vanilla [server] <list|add|remove></white> <gray>- Manage vanilla whitelist entries per backend.</gray>"),
+      help(CMD_WHITELIST, "<white>/sm whitelist vanilla [server] <list|add|remove|on|off|status></white> <gray>- Manage vanilla whitelist settings per backend.</gray>"),
       help(CMD_NETBAN, "<white>/sm networkban|netban <list|add|remove></white> <gray>- View or update network bans.</gray>"),
       help(CMD_HELP, "<white>/sm help</white> <gray>- Show this staff help menu.</gray>")
   );
   private static final List<String> HOLD_KEYWORDS = List.of("clear", "cancel", "off", "remove");
+  private static final List<String> HOLD_FOREVER_KEYWORDS = List.of("forever", "infinite", "inf", "infinity", "always", "permanent", "perma", "indefinite");
   private static final List<String> WHITELIST_SCOPES = List.of("network", "vanilla");
   private static final List<String> NETWORK_WL_ACTIONS = List.of("list", "add", "remove", "delete");
-  private static final List<String> VANILLA_WL_ACTIONS = List.of("list", "add", "remove");
+  private static final List<String> VANILLA_WL_ACTIONS = List.of("list", "add", "remove", "on", "off", "enable", "disable", "status", "state");
   private static final List<String> NETBAN_ACTIONS = List.of("list", "add", "remove", "delete", "unban");
   private static SubcommandMeta command(String primary, String[] perms, String... aliases) {
     List<String> triggers = new ArrayList<>();
@@ -291,6 +293,34 @@ public final class ServerManagerCmd implements SimpleCommand {
           sendWhitelistCommand(server, "whitelist remove " + name);
         }
         src.sendMessage(Component.text("Removed " + displayName(name, uuid) + " from " + server + " whitelist."));
+      }
+      case "on", "enable", "enabled" -> {
+        try {
+          boolean changed = vanillaWhitelist.setWhitelistEnabled(server, true);
+          sendWhitelistCommand(server, "whitelist on");
+          String suffix = (mgr != null && mgr.isRunning(server)) ? "." : " (applies on next start if offline).";
+          String prefix = changed ? "Vanilla whitelist for " + server + " is now enabled" : "Vanilla whitelist for " + server + " was already enabled";
+          src.sendMessage(Component.text(prefix + suffix));
+        } catch (IOException ex) {
+          log.error("Failed to enable vanilla whitelist", ex);
+          src.sendMessage(Component.text("Failed to update whitelist setting: " + ex.getMessage()));
+        }
+      }
+      case "off", "disable", "disabled" -> {
+        try {
+          boolean changed = vanillaWhitelist.setWhitelistEnabled(server, false);
+          sendWhitelistCommand(server, "whitelist off");
+          String suffix = (mgr != null && mgr.isRunning(server)) ? "." : " (applies on next start if offline).";
+          String prefix = changed ? "Vanilla whitelist for " + server + " is now disabled" : "Vanilla whitelist for " + server + " was already disabled";
+          src.sendMessage(Component.text(prefix + suffix));
+        } catch (IOException ex) {
+          log.error("Failed to disable vanilla whitelist", ex);
+          src.sendMessage(Component.text("Failed to update whitelist setting: " + ex.getMessage()));
+        }
+      }
+      case "status", "state" -> {
+        boolean enabled = vanillaWhitelist.isWhitelistEnabled(server);
+        src.sendMessage(Component.text("Vanilla whitelist for " + server + " is currently " + (enabled ? "enabled." : "disabled.")));
       }
       default -> src.sendMessage(mm0(WL_VANILLA_USAGE));
     }
@@ -634,7 +664,9 @@ public final class ServerManagerCmd implements SimpleCommand {
       return suggestServers(args.length >= 2 ? args[1] : "");
     }
     if (args.length == 3) {
-      return filterOptions(HOLD_KEYWORDS, args[2]);
+      List<String> options = new ArrayList<>(HOLD_KEYWORDS);
+      options.addAll(HOLD_FOREVER_KEYWORDS);
+      return filterOptions(options, args[2]);
     }
     return List.of();
   }
@@ -901,6 +933,7 @@ public final class ServerManagerCmd implements SimpleCommand {
     if (raw == null) return -1;
     String trimmed = raw.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
     if (trimmed.isEmpty()) return -1;
+    if (isHoldForever(trimmed)) return HOLD_FOREVER;
 
     Matcher matcher = DURATION_TOKEN.matcher(trimmed);
     int index = 0;
@@ -939,6 +972,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   }
 
   private static String formatDuration(long seconds) {
+    if (seconds == HOLD_FOREVER) return "forever";
     if (seconds <= 0L) return "0s";
     long remaining = seconds;
     long days = remaining / 86400L;
@@ -970,5 +1004,13 @@ public final class ServerManagerCmd implements SimpleCommand {
     if (template == null || template.isBlank()) return "";
     String normalized = normalize(template);
     return normalized.replace("<duration>", formatDuration(seconds));
+  }
+
+  private static boolean isHoldForever(String token) {
+    if (token == null) return false;
+    for (String kw : HOLD_FOREVER_KEYWORDS) {
+      if (kw.equalsIgnoreCase(token)) return true;
+    }
+    return false;
   }
 }

@@ -42,6 +42,10 @@ public final class ServerProcessManager {
       return 0L;
     }
     get(name); // validate server exists
+    if (durationSeconds == Long.MAX_VALUE) {
+      holdUntilMs.put(name, Long.MAX_VALUE);
+      return Long.MAX_VALUE;
+    }
     long now = System.currentTimeMillis();
     long durationMs;
     if (durationSeconds > Long.MAX_VALUE / 1000L) {
@@ -64,6 +68,7 @@ public final class ServerProcessManager {
   public synchronized boolean isHoldActive(String name) {
     Long until = holdUntilMs.get(name);
     if (until == null) return false;
+    if (until == Long.MAX_VALUE) return true;
     long now = System.currentTimeMillis();
     if (until <= now) {
       holdUntilMs.remove(name);
@@ -75,6 +80,7 @@ public final class ServerProcessManager {
   public synchronized long holdRemainingSeconds(String name) {
     Long until = holdUntilMs.get(name);
     if (until == null) return 0L;
+    if (until == Long.MAX_VALUE) return Long.MAX_VALUE;
     long now = System.currentTimeMillis();
     if (until <= now) {
       holdUntilMs.remove(name);

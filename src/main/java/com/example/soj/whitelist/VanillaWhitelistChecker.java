@@ -34,6 +34,7 @@ public final class VanillaWhitelistChecker {
   private final Logger log;
   private final Yaml yaml = new Yaml();
   private final Map<String, Path> serverFiles = new HashMap<>();
+  private final Map<String, Path> serverProperties = new HashMap<>();
   private final Map<Path, Cache> cache = new ConcurrentHashMap<>();
   private final String primaryName;
 
@@ -47,11 +48,11 @@ public final class VanillaWhitelistChecker {
     for (var entry : cfg.servers.entrySet()) {
       ServerConfig sc = entry.getValue();
       if (sc.workingDir == null || sc.workingDir.isBlank()) continue;
-      Path file = Paths.get(sc.workingDir)
-          .resolve(VANILLA_FILE)
-          .toAbsolutePath()
-          .normalize();
+      Path workingDir = Paths.get(sc.workingDir).toAbsolutePath().normalize();
+      Path file = workingDir.resolve(VANILLA_FILE);
+      Path properties = workingDir.resolve("server.properties");
       serverFiles.put(entry.getKey(), file);
+      serverProperties.put(entry.getKey(), properties);
     }
 
     Path primaryPath = primaryPath();
@@ -79,7 +80,7 @@ public final class VanillaWhitelistChecker {
     return isWhitelisted(path, uuid, username);
   }
 
-  /** Checks an arbitrary backend's whitelist; treats missing files as open. */
+  /** Checks an arbitrary backend's whitelist; missing files fail closed. */
   public boolean isWhitelisted(String server, UUID uuid, String username) {
     Path path = serverFiles.get(server);
     if (path == null) return true; // no whitelist file tracked -> allow
@@ -126,6 +127,29 @@ public final class VanillaWhitelistChecker {
     Path path = serverFiles.get(server);
     if (path == null) throw new IllegalArgumentException("Unknown server: " + server);
     return List.copyOf(readEntries(path));
+  }
+
+  /** Reads whether the vanilla whitelist is enforced for this backend (defaults to enabled). */
+  public boolean isWhitelistEnabled(String server) {
+    Path props = serverProperties.get(server);
+    if (props == null) return true;
+    return isWhitelistEnabled(props);
+  }
+
+  /**
+   * Enables or disables the vanilla whitelist in server.properties. Returns true when the
+   * file was modified (or created) and false when it already reflected the requested state.
+   */
+  public synchronized boolean setWhitelistEnabled(String server, boolean enabled) throws IOException {
+    Path props = serverProperties.get(server);
+    if (props == null) throw new IllegalArgumentException("Unknown server: " + server);
+    boolean changed = writeWhitelistEnabled(props, enabled);
+    if (!changed && !Files.exists(props)) {
+      Path parent = props.getParent();
+      if (parent != null) Files.createDirectories(parent);
+      Files.writeString(props, "", StandardCharsets.UTF_8);
+    }
+    return changed;
   }
 
   private Path primaryPath() {
@@ -279,5 +303,78 @@ public final class VanillaWhitelistChecker {
 
   private String escapeJson(String s) {
     return s.replace("\\", "\\\\").replace("\"", "\\\"");
+  }
+
+  private boolean isWhitelistEnabled(Path props) {
+    try {
+      if (!Files.exists(props)) return true;
+      Boolean found = null;
+      for (String line : Files.readAllLines(props, StandardCharsets.UTF_8)) {
+        String trimmed = line.trim();
+        if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+        int eq = trimmed.indexOf('=');
+        if (eq <= 0) continue;
+        String key = trimmed.substring(0, eq).trim();
+        if (!"enforce-whitelist".equalsIgnoreCase(key) && !"white-list".equalsIgnoreCase(key)) continue;
+        String value = trimmed.substring(eq + 1).trim();
+        boolean parsed = Boolean.parseBoolean(value);
+        found = parsed;
+        if ("enforce-whitelist".equalsIgnoreCase(key)) break; // prefer enforce-whitelist when present
+      }
+      return found == null ? true : found;
+    } catch (IOException ex) {
+      log.warn("Failed to read {}", props.toString().replace('\\','/'), ex);
+      return true;
+    }
+  }
+
+  private boolean writeWhitelistEnabled(Path props, boolean enabled) throws IOException {
+    String value = Boolean.toString(enabled);
+    List<String> lines = new ArrayList<>();
+    boolean enforceSeen = false;
+    boolean legacySeen = false;
+
+    if (Files.exists(props)) {
+      lines.addAll(Files.readAllLines(props, StandardCharsets.UTF_8));
+    }
+
+    boolean changed = false;
+    for (int i = 0; i < lines.size(); i++) {
+      String raw = lines.get(i);
+      String trimmed = raw.trim();
+      if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+      int eq = trimmed.indexOf('=');
+      if (eq <= 0) continue;
+      String key = trimmed.substring(0, eq).trim();
+      boolean matchesKey = "enforce-whitelist".equalsIgnoreCase(key) || "white-list".equalsIgnoreCase(key);
+      if (!matchesKey) continue;
+
+      String newLine = key + "=" + value;
+      if (!trimmed.equalsIgnoreCase(newLine)) {
+        lines.set(i, newLine);
+        changed = true;
+      }
+      if ("enforce-whitelist".equalsIgnoreCase(key)) {
+        enforceSeen = true;
+      } else {
+        legacySeen = true;
+      }
+    }
+
+    if (!enforceSeen) {
+      lines.add("enforce-whitelist=" + value);
+      changed = true;
+    }
+    if (!legacySeen) {
+      lines.add("white-list=" + value);
+      changed = true;
+    }
+
+    if (changed || !Files.exists(props)) {
+      Path parent = props.getParent();
+      if (parent != null) Files.createDirectories(parent);
+      Files.write(props, lines, StandardCharsets.UTF_8);
+    }
+    return changed;
   }
 }

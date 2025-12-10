@@ -20,7 +20,11 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
 - Paper/Spigot servers that can be launched via command line within their working directory
 
 ## Building
-1. Install the Velocity API JAR into your local Maven repo (replace the path if your build uses a different snapshot):
+1. Compile and package:
+   ```bash
+   mvn clean package
+   ```
+   Maven is configured to pull the Velocity API snapshot from PaperMC/Velocity repos. If your specific build number is not available there, install the JAR manually with:
    ```bash
    mvn install:install-file \
      -Dfile=/path/to/velocity-3.4.0-SNAPSHOT-534.jar \
@@ -29,11 +33,7 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
      -Dversion=3.4.0-SNAPSHOT-534 \
      -Dpackaging=jar
    ```
-2. Compile and package:
-   ```bash
-   mvn clean package
-   ```
-3. The shaded plugin JAR will be created at `target/servermanager-0.1.0.jar`.
+2. The shaded plugin JAR will be created at `target/servermanager-0.1.0.jar`.
 
 ## Installation
 1. Copy the shaded JAR into your Velocity `plugins/` directory.
@@ -65,7 +65,7 @@ messages:
   noPermission:   "<red>You don't have permission.</red>"
   usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>"
   helpHeader:     "<gray>ServerManager commands:</gray>"
-  holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|clear></green></white>"
+  holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|forever|clear></green></white>"
   holdSet:        "<green><white><server></white> will stay online for the next <duration>.</green>"
   holdStatus:     "<gray><white><server></white> hold remaining: <duration>.</gray>"
   holdCleared:    "<yellow>Hold cleared for <white><server></white>.</yellow>"
@@ -204,12 +204,12 @@ Root command aliases: `/servermanager`, `/sm`
 | `start`    | `servermanager.command.start`               | Boots the named managed server if it is offline. |
 | `stop`     | `servermanager.command.stop`                | Sends the graceful stop command to the backend. |
 | `help`     | _None_                                      | Prints the command overview along with `hold` syntax. |
-| `hold`     | `servermanager.command.hold`                | Keeps the backend running for the requested duration (accepts `30m`, `2h`, `1h30m`, etc.). Starts the server automatically if it is offline. |
+| `hold`     | `servermanager.command.hold`                | Keeps the backend running for the requested duration (accepts `30m`, `2h`, `1h30m`, or `forever`). Starts the server automatically if it is offline. |
 | `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
-| `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`. |
+| `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`, and toggles vanilla whitelist enforcement per server. |
 | `networkban` | `servermanager.command.networkban`        | Lists bans and adds/removes proxy-wide bans so blocked players can't start backend servers. |
 
-Durations default to minutes when no unit is supplied. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early.
+Durations default to minutes when no unit is supplied. Use `forever` for an indefinite hold. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early.
 
 \* Any of `servermanager.command.*`, `servermanager.*`, or legacy `startonjoin.*` nodes also satisfy the checks. Console sources bypass permission checks automatically.
 
@@ -219,7 +219,7 @@ Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for 
 
 ### Whitelist management (`/sm whitelist`)
 - `network list` shows the first 20 entries in `network-whitelist.yml` (with a count of any remaining). Use `network add <player|uuid> [name]` to add an online player or explicit UUID, and `network remove <player|uuid>` to revoke access. Adding a player mirrors them into every server that sets `mirrorNetworkWhitelist: true`.
-- `vanilla <server> list` dumps the current contents of that backend's `whitelist.json`. `vanilla <server> add <player|uuid> [name]` accepts either a UUID/online player or just a username (UUID preferred). Removals accept UUIDs or names as well, and active backends also receive a live `/whitelist add|remove ...` command for immediate effect.
+- `vanilla <server> list` dumps the current contents of that backend's `whitelist.json`. `vanilla <server> add <player|uuid> [name]` accepts either a UUID/online player or just a username (UUID preferred). Removals accept UUIDs or names as well, and active backends also receive a live `/whitelist add|remove ...` command for immediate effect. Use `vanilla <server> on|off|status` to enable/disable or query the backend's vanilla whitelist (writes `server.properties` and sends `/whitelist on|off` when online).
 - UUID arguments may omit dashes. When only a UUID is supplied the plugin tries to reuse the last known username from the network whitelist, ban list, or live player list.
 
 ### Network bans (`/sm networkban`)
