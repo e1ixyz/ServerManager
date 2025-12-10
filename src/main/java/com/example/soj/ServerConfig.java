@@ -19,4 +19,9 @@ public final class ServerConfig {
   public Boolean vanillaWhitelistBypassesNetwork;
   /** When true, players added to the network whitelist are mirrored into this backend's whitelist. */
   public Boolean mirrorNetworkWhitelist;
+  /**
+   * When set (minutes > 0), a server that is held indefinitely will auto-restart on this interval.
+   * Warnings are sent at 1 minute and 5 seconds before the restart kicks in.
+   */
+  public Long autoRestartHoldMinutes;
 }

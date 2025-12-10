@@ -12,6 +12,7 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
 - Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
 - Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve web onboarding.
 - In-game `/sm whitelist` tooling to view/add/remove entries from both the network whitelist and any managed vanilla `whitelist.json`, plus `/sm networkban` to enforce proxy-wide bans so blocked players can't even wake backend servers.
+- Optional auto-restart interval for servers held indefinitely, with 1-minute and 5-second warnings broadcast in-game.
 
 ## Requirements
 - Java 17+
@@ -97,6 +98,7 @@ servers:
     logFile: "logs/proxy-managed-lobby.log"
     vanillaWhitelistBypassesNetwork: true
     mirrorNetworkWhitelist: true
+    autoRestartHoldMinutes: 360
 
   survival:
     startOnJoin: false
@@ -107,6 +109,7 @@ servers:
     logFile: "logs/proxy-managed-survival.log"
     vanillaWhitelistBypassesNetwork: false
     mirrorNetworkWhitelist: false
+    autoRestartHoldMinutes: 0
 
 whitelist:
   enabled: true
@@ -209,7 +212,7 @@ Root command aliases: `/servermanager`, `/sm`
 | `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`, and toggles vanilla whitelist enforcement per server. |
 | `networkban` | `servermanager.command.networkban`        | Lists bans and adds/removes proxy-wide bans so blocked players can't start backend servers. |
 
-Durations default to minutes when no unit is supplied. Use `forever` for an indefinite hold. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early.
+Durations default to minutes when no unit is supplied. Use `forever` for an indefinite hold. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early. When a server is held forever and `autoRestartHoldMinutes` > 0 in its config, it will automatically restart on that interval with in-game warnings at 1 minute and 5 seconds.
 
 \* Any of `servermanager.command.*`, `servermanager.*`, or legacy `startonjoin.*` nodes also satisfy the checks. Console sources bypass permission checks automatically.
 

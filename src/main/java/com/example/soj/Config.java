@@ -47,6 +47,9 @@ public final class Config {
     public String holdNotActive  = "<gray><white><server></white> is not currently held.</gray>";
     public String holdInvalidDuration = "<red>Unknown duration '<duration>'.</red>";
     public String holdStatusSuffix = "<gray>(hold: <duration>)</gray>";
+    public String holdRestartWarning1m = "<yellow><white><server></white> will restart in 1 minute.</yellow>";
+    public String holdRestartWarning5s = "<red><white><server></white> will restart in 5 seconds.</red>";
+    public String holdRestartNow = "<red><white><server></white> is restarting now...</red>";
     public String reloadSuccess  = "<green>ServerManager reloaded successfully.</green>";
     public String reloadFailed   = "<red>Reload failed. Check console for details.</red>";
     public String notWhitelistedBackend = "<red>You are not whitelisted on <white><server></white>.</red>";
@@ -121,6 +124,9 @@ public final class Config {
           holdNotActive:  "<gray><white><server></white> is not currently held.</gray>"
           holdInvalidDuration: "<red>Unknown duration '<duration>'.</red>"
           holdStatusSuffix: "<gray>(hold: <duration>)</gray>"
+          holdRestartWarning1m: "<yellow><white><server></white> will restart in 1 minute.</yellow>"
+          holdRestartWarning5s: "<red><white><server></white> will restart in 5 seconds.</red>"
+          holdRestartNow: "<red><white><server></white> is restarting now...</red>"
           reloadSuccess:  "<green>ServerManager reloaded successfully.</green>"
           reloadFailed:   "<red>Reload failed. Check console for details.</red>"
           notWhitelistedBackend: "<red>You are not whitelisted on <white><server></white>.</red>"
@@ -138,19 +144,21 @@ public final class Config {
             workingDir: "../lobby"
             startCommand: "./start.sh"
             stopCommand: "stop"
-            logToFile: true
-            logFile: "logs/proxy-managed-lobby.log"
-            vanillaWhitelistBypassesNetwork: true
-            mirrorNetworkWhitelist: true
-          survival:
-            startOnJoin: false
-            workingDir: "../survival"
-            startCommand: "./start.sh"
-            stopCommand: "stop"
-            logToFile: true
-            logFile: "logs/proxy-managed-survival.log"
-            vanillaWhitelistBypassesNetwork: false
-            mirrorNetworkWhitelist: false
+          logToFile: true
+          logFile: "logs/proxy-managed-lobby.log"
+          vanillaWhitelistBypassesNetwork: true
+          mirrorNetworkWhitelist: true
+          autoRestartHoldMinutes: 360
+        survival:
+          startOnJoin: false
+          workingDir: "../survival"
+          startCommand: "./start.sh"
+          stopCommand: "stop"
+          logToFile: true
+          logFile: "logs/proxy-managed-survival.log"
+          vanillaWhitelistBypassesNetwork: false
+          mirrorNetworkWhitelist: false
+          autoRestartHoldMinutes: 0
         whitelist:
           enabled: false
           bind: "0.0.0.0"

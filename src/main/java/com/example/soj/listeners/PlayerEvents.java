@@ -75,8 +75,21 @@ public final class PlayerEvents {
 
   /** Lightweight readiness cache: true only after a successful ping. */
   private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
+  /** Auto-restart schedules for indefinite holds. */
+  private final Map<String, RestartSchedule> holdRestartTasks = new ConcurrentHashMap<>();
   @SuppressWarnings("FieldCanBeLocal")
   private final ScheduledTask heartbeatTask;
+
+  private static final class RestartSchedule {
+    final long restartAtMs;
+    ScheduledTask warn1m;
+    ScheduledTask warn5s;
+    ScheduledTask restart;
+
+    RestartSchedule(long restartAtMs) {
+      this.restartAtMs = restartAtMs;
+    }
+  }
 
   public PlayerEvents(
       Object pluginOwner,
@@ -148,6 +161,7 @@ public final class PlayerEvents {
     // Periodically ping all known servers to update readiness (for accurate MOTD)
     this.heartbeatTask = proxy.getScheduler().buildTask(pluginOwner, () -> {
       for (String name : cfg.servers.keySet()) {
+        refreshHoldRestart(name);
         if (!mgr.isRunning(name)) {
           isReadyCache.put(name, Boolean.FALSE);
           continue;
@@ -455,6 +469,109 @@ public final class PlayerEvents {
       pendingStopAll = null;
       log.info("Canceled pending stop-all due to player activity.");
     }
+  }
+
+  // -------------------- Indefinite hold auto-restart --------------------
+  private void refreshHoldRestart(String serverName) {
+    var sc = cfg.servers.get(serverName);
+    if (sc == null) {
+      cancelHoldRestart(serverName);
+      return;
+    }
+    long minutes = sc.autoRestartHoldMinutes == null ? 0L : sc.autoRestartHoldMinutes;
+    if (minutes <= 0) {
+      cancelHoldRestart(serverName);
+      return;
+    }
+    if (!mgr.isRunning(serverName)) {
+      cancelHoldRestart(serverName);
+      return;
+    }
+    if (mgr.holdRemainingSeconds(serverName) != Long.MAX_VALUE) {
+      cancelHoldRestart(serverName);
+      return;
+    }
+
+    long intervalMs = minutesToMillis(minutes);
+    if (intervalMs <= 0L) {
+      cancelHoldRestart(serverName);
+      return;
+    }
+
+    long now = System.currentTimeMillis();
+    RestartSchedule existing = holdRestartTasks.get(serverName);
+    if (existing != null && existing.restartAtMs > now) {
+      return; // already scheduled
+    }
+    scheduleHoldRestart(serverName, intervalMs);
+  }
+
+  private void scheduleHoldRestart(String serverName, long intervalMs) {
+    cancelHoldRestart(serverName);
+
+    long now = System.currentTimeMillis();
+    long restartAt = now + intervalMs;
+    RestartSchedule rs = new RestartSchedule(restartAt);
+    holdRestartTasks.put(serverName, rs);
+
+    long warn1mDelay = intervalMs - Duration.ofMinutes(1).toMillis();
+    if (warn1mDelay > 0) {
+      rs.warn1m = proxy.getScheduler().buildTask(pluginOwner, () ->
+          notifyPlayers(serverName, mm(cfg.messages.holdRestartWarning1m, serverName, "")))
+          .delay(Duration.ofMillis(warn1mDelay)).schedule();
+    }
+
+    long warn5sDelay = intervalMs - Duration.ofSeconds(5).toMillis();
+    if (warn5sDelay > 0) {
+      rs.warn5s = proxy.getScheduler().buildTask(pluginOwner, () ->
+          notifyPlayers(serverName, mm(cfg.messages.holdRestartWarning5s, serverName, "")))
+          .delay(Duration.ofMillis(warn5sDelay)).schedule();
+    }
+
+    rs.restart = proxy.getScheduler().buildTask(pluginOwner, () -> {
+      notifyPlayers(serverName, mm(cfg.messages.holdRestartNow, serverName, ""));
+      try {
+        log.info("[{}] auto-restart triggered (indefinite hold). Stopping...", serverName);
+        mgr.stop(serverName);
+        isReadyCache.put(serverName, Boolean.FALSE);
+      } catch (Exception ex) {
+        log.error("Failed to stop {} during auto-restart", serverName, ex);
+      }
+      try {
+        mgr.start(serverName);
+        log.info("[{}] auto-restart start issued.", serverName);
+      } catch (IOException ex) {
+        log.error("Failed to start {} during auto-restart", serverName, ex);
+      } finally {
+        holdRestartTasks.remove(serverName);
+      }
+    }).delay(Duration.ofMillis(intervalMs)).schedule();
+
+    log.info("[{}] scheduled auto-restart in {} minutes (indefinite hold).", serverName, intervalMs / 60000L);
+  }
+
+  private void cancelHoldRestart(String serverName) {
+    RestartSchedule rs = holdRestartTasks.remove(serverName);
+    if (rs == null) return;
+    if (rs.warn1m != null) rs.warn1m.cancel();
+    if (rs.warn5s != null) rs.warn5s.cancel();
+    if (rs.restart != null) rs.restart.cancel();
+  }
+
+  private void notifyPlayers(String serverName, Component message) {
+    if (message == null) return;
+    proxy.getAllPlayers().forEach(p -> p.getCurrentServer().ifPresent(cs -> {
+      if (cs.getServerInfo().getName().equals(serverName)) {
+        p.sendMessage(message);
+      }
+    }));
+  }
+
+  private long minutesToMillis(long minutes) {
+    if (minutes <= 0) return 0L;
+    long max = Long.MAX_VALUE / 60000L;
+    if (minutes > max) return Long.MAX_VALUE;
+    return minutes * 60000L;
   }
 
   // -------------------- Auto-send poller --------------------
@@ -773,6 +890,12 @@ public final class PlayerEvents {
     waitingTarget.clear();
     readyNotifyOnce.clear();
     lastKnownServer.clear();
+    holdRestartTasks.values().forEach(rs -> {
+      if (rs.warn1m != null) rs.warn1m.cancel();
+      if (rs.warn5s != null) rs.warn5s.cancel();
+      if (rs.restart != null) rs.restart.cancel();
+    });
+    holdRestartTasks.clear();
     heartbeatTask.cancel();
   }
 }
