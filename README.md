@@ -24,13 +24,13 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
    ```bash
    mvn clean package
    ```
-   Maven is configured to pull the Velocity API snapshot from PaperMC/Velocity repos. If your specific build number is not available there, install the JAR manually with:
+   Maven is configured to pull the Velocity API snapshot (3.4.0-SNAPSHOT) from PaperMC/Velocity repos. If your specific build number is not available there, install the JAR manually with:
    ```bash
    mvn install:install-file \
-     -Dfile=/path/to/velocity-3.4.0-SNAPSHOT-534.jar \
+     -Dfile=/path/to/velocity-3.4.0-SNAPSHOT.jar \
      -DgroupId=com.velocitypowered \
      -DartifactId=velocity-api \
-     -Dversion=3.4.0-SNAPSHOT-534 \
+     -Dversion=3.4.0-SNAPSHOT \
      -Dpackaging=jar
    ```
 2. The shaded plugin JAR will be created at `target/servermanager-0.1.0.jar`.
