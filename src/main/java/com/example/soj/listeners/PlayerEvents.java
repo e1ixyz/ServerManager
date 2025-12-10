@@ -259,6 +259,8 @@ public final class PlayerEvents {
     }
     String primary = cfg.primaryServerName();
     boolean running = mgr.isRunning(target);
+    boolean ready = isReady(target);
+    boolean startingState = running && !ready;
     boolean isPrimary = target.equals(primary);
     boolean hasFallback = player.getCurrentServer().isPresent();
 
@@ -285,11 +287,15 @@ public final class PlayerEvents {
 
     // Any managed server (including primary when not first-join):
     // If offline, start it, deny immediate connect, message the player, and queue auto-send.
-    if (!running) {
+    if (!running || startingState) {
       if (!hasFallback) {
         try {
-          log.info("Intercepting initial connect to offline [{}]; starting process for {}", target, player.getUsername());
-          mgr.start(target);
+          if (!running) {
+            log.info("Intercepting initial connect to offline [{}]; starting process for {}", target, player.getUsername());
+            mgr.start(target);
+          } else {
+            log.info("Intercepting connect to starting [{}]; deferring player {}", target, player.getUsername());
+          }
         } catch (IOException ex) {
           log.error("Failed to start server {}", target, ex);
           event.setResult(ServerPreConnectEvent.ServerResult.denied());
@@ -316,8 +322,12 @@ public final class PlayerEvents {
       }
 
       try {
-        log.info("Intercepting connect to offline [{}]; starting and queueing auto-connect", target);
-        mgr.start(target);
+        if (!running) {
+          log.info("Intercepting connect to offline [{}]; starting and queueing auto-connect", target);
+          mgr.start(target);
+        } else {
+          log.info("Intercepting connect to starting [{}]; queueing auto-connect", target);
+        }
       } catch (IOException ex) {
         log.error("Failed to start server {}", target, ex);
         event.setResult(ServerPreConnectEvent.ServerResult.denied());
@@ -668,6 +678,10 @@ public final class PlayerEvents {
       if (cs.getServerInfo().getName().equals(serverName)) c[0]++;
     }));
     return c[0];
+  }
+
+  private boolean isReady(String serverName) {
+    return Boolean.TRUE.equals(isReadyCache.get(serverName));
   }
 
   private boolean hasNetworkAccess(Player player) {
