@@ -103,8 +103,6 @@ public final class Config {
     public String authFile = "admin-auth.yml";
     /** Session lifetime (minutes). */
     public int sessionMinutes = 60;
-    /** Require TOTP for login; future flag to allow basic auth when false. */
-    public boolean totpRequired = true;
   }
 
   public static Config loadOrCreateDefault(Path path, Logger log) throws Exception {
@@ -160,7 +158,7 @@ public final class Config {
           logFile: "logs/proxy-managed-lobby.log"
           vanillaWhitelistBypassesNetwork: true
           mirrorNetworkWhitelist: true
-          autoRestartHoldMinutes: 360
+          autoRestartHoldTime: "05:00"
         survival:
           startOnJoin: false
           workingDir: "../survival"
@@ -170,7 +168,7 @@ public final class Config {
           logFile: "logs/proxy-managed-survival.log"
           vanillaWhitelistBypassesNetwork: false
           mirrorNetworkWhitelist: false
-          autoRestartHoldMinutes: 0
+          autoRestartHoldTime: ""
         whitelist:
           enabled: false
           bind: "0.0.0.0"
@@ -193,7 +191,6 @@ public final class Config {
           enabled: false
           authFile: "admin-auth.yml"
           sessionMinutes: 60
-          totpRequired: true
         forcedHosts: {}
         """;
       Files.createDirectories(path.getParent());

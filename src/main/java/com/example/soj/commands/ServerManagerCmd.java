@@ -70,7 +70,7 @@ public final class ServerManagerCmd implements SimpleCommand {
       help(CMD_START, "<white>/sm start [server]</white> <gray>- Start a managed server manually.</gray>"),
       help(CMD_STOP, "<white>/sm stop [server]</white> <gray>- Stop a running managed server.</gray>"),
       help(CMD_HOLD, "<white>/sm hold [server] [duration|forever|clear]</white> <gray>- Hold a server online or clear the hold.</gray>"),
-      help(CMD_ADMINAUTH, "<white>/sm adminauth [player]</white> <gray>- Provision/reset an admin TOTP secret for the web panel.</gray>"),
+      help(CMD_ADMINAUTH, "<white>/sm adminauth [player]</white> <gray>- Provision/reset an admin token for the web panel.</gray>"),
       help(CMD_RELOAD, "<white>/sm reload</white> <gray>- Reload ServerManager config and listeners.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist network <list|add|remove></white> <gray>- Manage the shared network whitelist.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist vanilla [server] <list|add|remove|on|off|status></white> <gray>- Manage vanilla whitelist settings per backend.</gray>"),
@@ -577,20 +577,13 @@ public final class ServerManagerCmd implements SimpleCommand {
         try {
           var prov = adminAuth.provision(server);
           Component secretLine = Component.text()
-              .append(Component.text("Admin TOTP secret for ", NamedTextColor.GRAY))
+              .append(Component.text("Admin token for ", NamedTextColor.GRAY))
               .append(Component.text(server + ": ", NamedTextColor.WHITE))
               .append(Component.text(prov.secret(), NamedTextColor.GOLD, TextDecoration.BOLD)
                   .hoverEvent(Component.text("Click to copy"))
                   .clickEvent(ClickEvent.copyToClipboard(prov.secret())))
               .build();
-          Component uriLine = Component.text()
-              .append(Component.text("otpauth URI ", NamedTextColor.GRAY))
-              .append(Component.text("[click to copy]", NamedTextColor.AQUA)
-                  .hoverEvent(Component.text(prov.otpauthUri()))
-                  .clickEvent(ClickEvent.copyToClipboard(prov.otpauthUri())))
-              .build();
           src.sendMessage(secretLine);
-          src.sendMessage(uriLine);
         } catch (Exception ex) {
           log.error("Failed to provision admin auth", ex);
           src.sendMessage(Component.text("Failed to provision: " + ex.getMessage()));

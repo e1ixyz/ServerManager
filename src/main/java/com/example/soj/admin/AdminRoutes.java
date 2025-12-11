@@ -201,7 +201,7 @@ public final class AdminRoutes {
         </style></head><body>
         <div class='card'><h1>Admin Login</h1>%s<form method='post' action='/admin'>
         <label for='user'>Minecraft Username</label><input id='user' name='user' autocomplete='username'>
-        <label for='code'>Authenticator Code</label><input id='code' name='code' autocomplete='one-time-code'>
+        <label for='code'>Admin Token</label><input id='code' name='code' autocomplete='one-time-code'>
         <button type='submit'>Sign In</button></form></div></body></html>
         """.formatted(err);
     sendHtml(ex, 200, html);

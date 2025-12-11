@@ -4,18 +4,14 @@ import com.example.soj.Config;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.Yaml;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
-import java.time.Instant;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -39,17 +35,14 @@ public final class AdminAuthService {
     load();
   }
 
-  /** Generates or resets a TOTP secret for the given MC username. */
+  /** Generates or resets an admin token for the given MC username. */
   public synchronized Provisioning provision(String mcUser) throws IOException {
     String normalized = normalize(mcUser);
     if (normalized == null) throw new IllegalArgumentException("Username required");
     String secret = generateSecret();
     secrets.put(normalized, secret);
     persist();
-    String issuer = "ServerManager";
-    String label = issuer + ":" + normalized;
-    String uri = "otpauth://totp/" + urlEncode(label) + "?secret=" + secret + "&issuer=" + urlEncode(issuer);
-    return new Provisioning(secret, uri);
+    return new Provisioning(secret);
   }
 
   public boolean verify(String mcUser, String code) {
@@ -58,40 +51,7 @@ public final class AdminAuthService {
     String secret = secrets.get(normalized);
     if (secret == null || code == null) return false;
     String trimmed = code.trim();
-    if (!trimmed.matches("\\d{6}")) return false;
-
-    long now = Instant.now().getEpochSecond();
-    long step = 30L;
-    long counter = now / step;
-    for (long offset = -1; offset <= 1; offset++) {
-      String expected = totp(secret, counter + offset);
-      if (Objects.equals(expected, trimmed)) return true;
-    }
-    return false;
-  }
-
-  private String totp(String base32Secret, long counter) {
-    try {
-      byte[] key = base32Decode(base32Secret);
-      byte[] msg = new byte[8];
-      for (int i = 7; i >= 0; i--) {
-        msg[i] = (byte) (counter & 0xFF);
-        counter >>= 8;
-      }
-      Mac mac = Mac.getInstance("HmacSHA1");
-      mac.init(new SecretKeySpec(key, "HmacSHA1"));
-      byte[] hmac = mac.doFinal(msg);
-      int offset = hmac[hmac.length - 1] & 0x0F;
-      int bin = ((hmac[offset] & 0x7F) << 24)
-          | ((hmac[offset + 1] & 0xFF) << 16)
-          | ((hmac[offset + 2] & 0xFF) << 8)
-          | (hmac[offset + 3] & 0xFF);
-      int otp = bin % 1_000_000;
-      return String.format(Locale.ROOT, "%06d", otp);
-    } catch (Exception ex) {
-      log.warn("Failed to compute TOTP", ex);
-      return null;
-    }
+    return !trimmed.isEmpty() && secret.equals(trimmed);
   }
 
   private String generateSecret() {
@@ -129,7 +89,7 @@ public final class AdminAuthService {
     return java.net.URLEncoder.encode(s, StandardCharsets.UTF_8);
   }
 
-  public record Provisioning(String secret, String otpauthUri) {}
+  public record Provisioning(String secret) {}
 
   // ---- minimal Base32 (RFC 4648) helpers ----
   private static final String ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -154,22 +114,4 @@ public final class AdminAuthService {
     return sb.toString();
   }
 
-  private byte[] base32Decode(String s) {
-    String upper = s.replace("=", "").toUpperCase(Locale.ROOT);
-    java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-    int buffer = 0;
-    int bitsLeft = 0;
-    for (int i = 0; i < upper.length(); i++) {
-      char c = upper.charAt(i);
-      int val = ALPHABET.indexOf(c);
-      if (val < 0) continue;
-      buffer = (buffer << 5) | val;
-      bitsLeft += 5;
-      if (bitsLeft >= 8) {
-        out.write((buffer >> (bitsLeft - 8)) & 0xFF);
-        bitsLeft -= 8;
-      }
-    }
-    return out.toByteArray();
-  }
 }

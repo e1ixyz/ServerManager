@@ -43,6 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class PlayerEvents {
   /** How long to wait for a started backend before timing out auto-send (seconds). */
   private static final int START_CONNECT_TIMEOUT_SECONDS = 90;
+  private static final java.time.format.DateTimeFormatter HHMM = java.time.format.DateTimeFormatter.ofPattern("H:mm");
 
   private final Object pluginOwner;
   private final ProxyServer proxy;
@@ -490,8 +491,8 @@ public final class PlayerEvents {
       cancelHoldRestart(serverName);
       return;
     }
-    long minutes = sc.autoRestartHoldMinutes == null ? 0L : sc.autoRestartHoldMinutes;
-    if (minutes <= 0) {
+    String time = sc.autoRestartHoldTime;
+    if (time == null || time.isBlank()) {
       cancelHoldRestart(serverName);
       return;
     }
@@ -504,8 +505,8 @@ public final class PlayerEvents {
       return;
     }
 
-    long intervalMs = minutesToMillis(minutes);
-    if (intervalMs <= 0L) {
+    long delayMs = millisUntil(time);
+    if (delayMs <= 0L) {
       cancelHoldRestart(serverName);
       return;
     }
@@ -515,25 +516,25 @@ public final class PlayerEvents {
     if (existing != null && existing.restartAtMs > now) {
       return; // already scheduled
     }
-    scheduleHoldRestart(serverName, intervalMs);
+    scheduleHoldRestart(serverName, delayMs, time);
   }
 
-  private void scheduleHoldRestart(String serverName, long intervalMs) {
+  private void scheduleHoldRestart(String serverName, long delayMs, String time) {
     cancelHoldRestart(serverName);
 
     long now = System.currentTimeMillis();
-    long restartAt = now + intervalMs;
+    long restartAt = now + delayMs;
     RestartSchedule rs = new RestartSchedule(restartAt);
     holdRestartTasks.put(serverName, rs);
 
-    long warn1mDelay = intervalMs - Duration.ofMinutes(1).toMillis();
+    long warn1mDelay = delayMs - Duration.ofMinutes(1).toMillis();
     if (warn1mDelay > 0) {
       rs.warn1m = proxy.getScheduler().buildTask(pluginOwner, () ->
           notifyPlayers(serverName, mm(cfg.messages.holdRestartWarning1m, serverName, "")))
           .delay(Duration.ofMillis(warn1mDelay)).schedule();
     }
 
-    long warn5sDelay = intervalMs - Duration.ofSeconds(5).toMillis();
+    long warn5sDelay = delayMs - Duration.ofSeconds(5).toMillis();
     if (warn5sDelay > 0) {
       rs.warn5s = proxy.getScheduler().buildTask(pluginOwner, () ->
           notifyPlayers(serverName, mm(cfg.messages.holdRestartWarning5s, serverName, "")))
@@ -556,10 +557,14 @@ public final class PlayerEvents {
         log.error("Failed to start {} during auto-restart", serverName, ex);
       } finally {
         holdRestartTasks.remove(serverName);
+        long nextDelay = millisUntil(time);
+        if (nextDelay > 0) {
+          scheduleHoldRestart(serverName, nextDelay, time);
+        }
       }
-    }).delay(Duration.ofMillis(intervalMs)).schedule();
+    }).delay(Duration.ofMillis(delayMs)).schedule();
 
-    log.info("[{}] scheduled auto-restart in {} minutes (indefinite hold).", serverName, intervalMs / 60000L);
+    log.info("[{}] scheduled auto-restart at {} (in {}ms) for indefinite hold.", serverName, time, delayMs);
   }
 
   private void cancelHoldRestart(String serverName) {
@@ -579,11 +584,21 @@ public final class PlayerEvents {
     }));
   }
 
-  private long minutesToMillis(long minutes) {
-    if (minutes <= 0) return 0L;
-    long max = Long.MAX_VALUE / 60000L;
-    if (minutes > max) return Long.MAX_VALUE;
-    return minutes * 60000L;
+  private long millisUntil(String time) {
+    try {
+      java.time.LocalTime target = java.time.LocalTime.parse(time.trim(), HHMM);
+      java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+      java.time.ZonedDateTime now = java.time.ZonedDateTime.now(zone);
+      java.time.ZonedDateTime next = now.with(target);
+      if (!next.isAfter(now)) {
+        next = next.plusDays(1);
+      }
+      long millis = java.time.Duration.between(now, next).toMillis();
+      return millis <= 0 ? 0 : millis;
+    } catch (Exception ex) {
+      log.warn("Invalid autoRestartHoldTime '{}'", time);
+      return 0L;
+    }
   }
 
   // -------------------- Auto-send poller --------------------

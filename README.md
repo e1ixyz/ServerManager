@@ -98,7 +98,7 @@ servers:
     logFile: "logs/proxy-managed-lobby.log"
     vanillaWhitelistBypassesNetwork: true
     mirrorNetworkWhitelist: true
-    autoRestartHoldMinutes: 360
+    autoRestartHoldTime: "05:00"
 
   survival:
     startOnJoin: false
@@ -109,7 +109,7 @@ servers:
     logFile: "logs/proxy-managed-survival.log"
     vanillaWhitelistBypassesNetwork: false
     mirrorNetworkWhitelist: false
-    autoRestartHoldMinutes: 0
+    autoRestartHoldTime: ""
 
 whitelist:
   enabled: true
@@ -212,7 +212,7 @@ Root command aliases: `/servermanager`, `/sm`
 | `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`, and toggles vanilla whitelist enforcement per server. |
 | `networkban` | `servermanager.command.networkban`        | Lists bans and adds/removes proxy-wide bans so blocked players can't start backend servers. |
 
-Durations default to minutes when no unit is supplied. Use `forever` for an indefinite hold. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early. When a server is held forever and `autoRestartHoldMinutes` > 0 in its config, it will automatically restart on that interval with in-game warnings at 1 minute and 5 seconds.
+Durations default to minutes when no unit is supplied. Use `forever` for an indefinite hold. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early. When a server is held forever and `autoRestartHoldTime` is set (HH:mm), it will automatically restart at that daily time with in-game warnings at 1 minute and 5 seconds.
 
 \* Any of `servermanager.command.*`, `servermanager.*`, or legacy `startonjoin.*` nodes also satisfy the checks. Console sources bypass permission checks automatically.
 
