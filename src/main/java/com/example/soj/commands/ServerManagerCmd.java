@@ -11,6 +11,9 @@ import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.slf4j.Logger;
@@ -573,8 +576,21 @@ public final class ServerManagerCmd implements SimpleCommand {
         if (server == null) { src.sendMessage(Component.text("Usage: /sm adminauth <player>")); return; }
         try {
           var prov = adminAuth.provision(server);
-          src.sendMessage(Component.text("TOTP secret for " + server + ": " + prov.secret()));
-          src.sendMessage(Component.text("otpauth URI: " + prov.otpauthUri()));
+          Component secretLine = Component.text()
+              .append(Component.text("Admin TOTP secret for ", NamedTextColor.GRAY))
+              .append(Component.text(server + ": ", NamedTextColor.WHITE))
+              .append(Component.text(prov.secret(), NamedTextColor.GOLD, TextDecoration.BOLD)
+                  .hoverEvent(Component.text("Click to copy"))
+                  .clickEvent(ClickEvent.copyToClipboard(prov.secret())))
+              .build();
+          Component uriLine = Component.text()
+              .append(Component.text("otpauth URI ", NamedTextColor.GRAY))
+              .append(Component.text("[click to copy]", NamedTextColor.AQUA)
+                  .hoverEvent(Component.text(prov.otpauthUri()))
+                  .clickEvent(ClickEvent.copyToClipboard(prov.otpauthUri())))
+              .build();
+          src.sendMessage(secretLine);
+          src.sendMessage(uriLine);
         } catch (Exception ex) {
           log.error("Failed to provision admin auth", ex);
           src.sendMessage(Component.text("Failed to provision: " + ex.getMessage()));
