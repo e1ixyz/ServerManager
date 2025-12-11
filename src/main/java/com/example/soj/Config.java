@@ -21,6 +21,7 @@ public final class Config {
   public Messages messages = new Messages();
   public Whitelist whitelist = new Whitelist();
   public Banlist banlist = new Banlist();
+  public Admin admin = new Admin();
 
   public static final class Motd {
     public String offline  = "<gray>Your Network</gray> <gray>- <white><server></white></gray>";
@@ -93,6 +94,17 @@ public final class Config {
   public static final class Banlist {
     public boolean enabled = true;
     public String dataFile = "network-bans.yml";
+  }
+
+  public static final class Admin {
+    /** Enable the web admin panel (/admin on the web server). */
+    public boolean enabled = false;
+    /** Where to store admin TOTP secrets. */
+    public String authFile = "admin-auth.yml";
+    /** Session lifetime (minutes). */
+    public int sessionMinutes = 60;
+    /** Require TOTP for login; future flag to allow basic auth when false. */
+    public boolean totpRequired = true;
   }
 
   public static Config loadOrCreateDefault(Path path, Logger log) throws Exception {
@@ -177,6 +189,11 @@ public final class Config {
         banlist:
           enabled: true
           dataFile: "network-bans.yml"
+        admin:
+          enabled: false
+          authFile: "admin-auth.yml"
+          sessionMinutes: 60
+          totpRequired: true
         forcedHosts: {}
         """;
       Files.createDirectories(path.getParent());
@@ -209,6 +226,7 @@ public final class Config {
     if (cfg.messages == null) cfg.messages = new Messages();
     if (cfg.whitelist == null) cfg.whitelist = new Whitelist();
     if (cfg.banlist == null) cfg.banlist = new Banlist();
+    if (cfg.admin == null) cfg.admin = new Admin();
     if (cfg.forcedHosts == null) cfg.forcedHosts = new LinkedHashMap<>();
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;

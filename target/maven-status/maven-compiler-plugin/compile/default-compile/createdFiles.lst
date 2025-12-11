@@ -1,6 +1,9 @@
 com/example/soj/Config.class
+com/example/soj/Config$Admin.class
 com/example/soj/ManagedServer.class
 com/example/soj/Config$Whitelist.class
+com/example/soj/admin/AdminAuthService.class
+com/example/soj/admin/AdminSessionManager$Session.class
 com/example/soj/Config$Banlist.class
 com/example/soj/bans/NetworkBanService$Entry.class
 com/example/soj/whitelist/VanillaWhitelistChecker.class
@@ -15,6 +18,7 @@ com/example/soj/commands/StopCmd.class
 com/example/soj/listeners/PlayerEvents.class
 com/example/soj/commands/StatusCmd.class
 com/example/soj/whitelist/WhitelistHttpServer.class
+com/example/soj/admin/AdminAuthService$Provisioning.class
 com/example/soj/whitelist/VanillaWhitelistChecker$VanillaEntry.class
 com/example/soj/ServerManagerPlugin.class
 com/example/soj/whitelist/VanillaWhitelistChecker$Cache.class
@@ -23,6 +27,8 @@ com/example/soj/listeners/PlayerEvents$RestartSchedule.class
 com/example/soj/commands/StartCmd.class
 com/example/soj/Config$ForcedHost.class
 com/example/soj/ServerProcessManager.class
+com/example/soj/admin/AdminRoutes.class
+com/example/soj/admin/AdminSessionManager.class
 com/example/soj/commands/ServerManagerCmd.class
 com/example/soj/whitelist/WhitelistService$Entry.class
 com/example/soj/commands/ServerManagerCmd$HelpEntry.class

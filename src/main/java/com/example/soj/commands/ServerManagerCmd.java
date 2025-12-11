@@ -39,6 +39,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final String[] PERM_START = {"servermanager.command.start", "servermanager.start"};
   private static final String[] PERM_STOP = {"servermanager.command.stop", "servermanager.stop"};
   private static final String[] PERM_HOLD = {"servermanager.command.hold", "servermanager.hold"};
+  private static final String[] PERM_ADMINAUTH = {"servermanager.command.adminauth", "servermanager.adminauth"};
   private static final String[] PERM_RELOAD = {"servermanager.command.reload", "servermanager.reload"};
   private static final String[] PERM_WHITELIST = {"servermanager.command.whitelist", "servermanager.whitelist"};
   private static final String[] PERM_NETBAN = {"servermanager.command.networkban", "servermanager.networkban"};
@@ -53,18 +54,20 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final SubcommandMeta CMD_START = command("start", PERM_START);
   private static final SubcommandMeta CMD_STOP = command("stop", PERM_STOP);
   private static final SubcommandMeta CMD_HOLD = command("hold", PERM_HOLD);
+  private static final SubcommandMeta CMD_ADMINAUTH = command("adminauth", new String[]{"servermanager.command.adminauth", "servermanager.adminauth"});
   private static final SubcommandMeta CMD_RELOAD = command("reload", PERM_RELOAD);
   private static final SubcommandMeta CMD_WHITELIST = command("whitelist", PERM_WHITELIST);
   private static final SubcommandMeta CMD_NETBAN = command("networkban", PERM_NETBAN, "netban");
   private static final SubcommandMeta CMD_HELP = command("help", PERM_HELP);
   private static final List<SubcommandMeta> SUBCOMMANDS = List.of(
-      CMD_STATUS, CMD_START, CMD_STOP, CMD_HOLD, CMD_RELOAD, CMD_WHITELIST, CMD_NETBAN, CMD_HELP
+      CMD_STATUS, CMD_START, CMD_STOP, CMD_HOLD, CMD_ADMINAUTH, CMD_RELOAD, CMD_WHITELIST, CMD_NETBAN, CMD_HELP
   );
   private static final List<HelpEntry> HELP_ENTRIES = List.of(
       help(CMD_STATUS, "<white>/sm status</white> <gray>- View the state of all managed servers.</gray>"),
       help(CMD_START, "<white>/sm start [server]</white> <gray>- Start a managed server manually.</gray>"),
       help(CMD_STOP, "<white>/sm stop [server]</white> <gray>- Stop a running managed server.</gray>"),
       help(CMD_HOLD, "<white>/sm hold [server] [duration|forever|clear]</white> <gray>- Hold a server online or clear the hold.</gray>"),
+      help(CMD_ADMINAUTH, "<white>/sm adminauth [player]</white> <gray>- Provision/reset an admin TOTP secret for the web panel.</gray>"),
       help(CMD_RELOAD, "<white>/sm reload</white> <gray>- Reload ServerManager config and listeners.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist network <list|add|remove></white> <gray>- Manage the shared network whitelist.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist vanilla [server] <list|add|remove|on|off|status></white> <gray>- Manage vanilla whitelist settings per backend.</gray>"),
@@ -115,6 +118,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   private volatile WhitelistService whitelist;
   private volatile VanillaWhitelistChecker vanillaWhitelist;
   private volatile NetworkBanService networkBans;
+  private volatile com.example.soj.admin.AdminAuthService adminAuth;
   private final Logger log;
   private final ServerManagerPlugin plugin;
   private final ProxyServer proxy;
@@ -409,12 +413,14 @@ public final class ServerManagerCmd implements SimpleCommand {
   }
   public void updateState(ServerProcessManager mgr, Config cfg,
                           WhitelistService whitelist, VanillaWhitelistChecker vanillaWhitelist,
-                          NetworkBanService networkBans) {
+                          NetworkBanService networkBans,
+                          com.example.soj.admin.AdminAuthService adminAuth) {
     this.mgr = mgr;
     this.cfg = cfg;
     this.whitelist = whitelist;
     this.vanillaWhitelist = vanillaWhitelist;
     this.networkBans = networkBans;
+    this.adminAuth = adminAuth;
   }
 
   @Override
@@ -560,6 +566,19 @@ public final class ServerManagerCmd implements SimpleCommand {
         manager.hold(server, seconds);
         long remaining = manager.holdRemainingSeconds(server);
         src.sendMessage(mmDuration(firstNonBlank(config.messages.holdSet, config.messages.holdStatus), server, playerName, formatDuration(remaining)));
+      }
+      case "adminauth" -> {
+        if (!has(src, PERM_ADMINAUTH)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        if (adminAuth == null) { src.sendMessage(Component.text("Admin auth is not enabled in config.")); return; }
+        if (server == null) { src.sendMessage(Component.text("Usage: /sm adminauth <player>")); return; }
+        try {
+          var prov = adminAuth.provision(server);
+          src.sendMessage(Component.text("TOTP secret for " + server + ": " + prov.secret()));
+          src.sendMessage(Component.text("otpauth URI: " + prov.otpauthUri()));
+        } catch (Exception ex) {
+          log.error("Failed to provision admin auth", ex);
+          src.sendMessage(Component.text("Failed to provision: " + ex.getMessage()));
+        }
       }
       case "reload" -> {
         if (!has(src, PERM_RELOAD)) { src.sendMessage(mm0(config.messages.noPermission)); return; }

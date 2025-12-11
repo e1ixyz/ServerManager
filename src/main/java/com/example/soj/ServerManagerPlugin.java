@@ -1,8 +1,8 @@
 package com.example.soj;
 
-import com.example.soj.listeners.PlayerEvents;
 import com.example.soj.commands.ServerManagerCmd;
 import com.example.soj.bans.NetworkBanService;
+import com.example.soj.listeners.PlayerEvents;
 import com.example.soj.whitelist.WhitelistHttpServer;
 import com.example.soj.whitelist.WhitelistService;
 import com.example.soj.whitelist.VanillaWhitelistChecker;
@@ -39,6 +39,8 @@ public final class ServerManagerPlugin {
   private NetworkBanService networkBanService;
   private PlayerEvents playerEvents;
   private ServerManagerCmd rootCommand;
+  private com.example.soj.admin.AdminAuthService adminAuth;
+  private com.example.soj.admin.AdminSessionManager adminSessions;
 
   @Inject
   public ServerManagerPlugin(ProxyServer proxy, Logger logger, @com.velocitypowered.api.plugin.annotation.DataDirectory Path dataDir) {
@@ -58,7 +60,7 @@ public final class ServerManagerPlugin {
       var cm = proxy.getCommandManager();
       var meta = cm.metaBuilder("servermanager").aliases("sm").plugin(this).build();
       this.rootCommand = new ServerManagerCmd(this, proxy, logger);
-      this.rootCommand.updateState(processManager, config, whitelistService, vanillaWhitelist, networkBanService);
+      this.rootCommand.updateState(processManager, config, whitelistService, vanillaWhitelist, networkBanService, adminAuth);
       cm.register(meta, rootCommand);
 
       logger.info("ServerManager initialized. Primary: {}", config.primaryServerName());
@@ -82,6 +84,8 @@ public final class ServerManagerPlugin {
       if (processManager != null) {
         processManager.stopAllGracefully();
       }
+      adminAuth = null;
+      adminSessions = null;
     } catch (Exception ex) {
       logger.error("Error during shutdown stopAll", ex);
     }
@@ -132,7 +136,7 @@ public final class ServerManagerPlugin {
 
   private void initializeRuntime(Config newConfig) throws Exception {
     if (processManager == null) {
-      processManager = new ServerProcessManager(newConfig, logger);
+      processManager = new ServerProcessManager(newConfig, logger, dataDir);
     } else {
       processManager.reload(newConfig);
     }
@@ -140,13 +144,21 @@ public final class ServerManagerPlugin {
     this.whitelistService = new WhitelistService(newConfig.whitelist, logger, dataDir);
     this.vanillaWhitelist = new VanillaWhitelistChecker(newConfig, logger);
     this.networkBanService = new NetworkBanService(newConfig.banlist, logger, dataDir);
-    this.whitelistHttpServer = new WhitelistHttpServer(newConfig.whitelist, logger, whitelistService);
+    if (newConfig.admin != null && newConfig.admin.enabled) {
+      this.adminAuth = new com.example.soj.admin.AdminAuthService(newConfig.admin, dataDir, logger);
+      this.adminSessions = new com.example.soj.admin.AdminSessionManager(newConfig.admin);
+    } else {
+      this.adminAuth = null;
+      this.adminSessions = null;
+    }
+    this.whitelistHttpServer = new WhitelistHttpServer(newConfig, newConfig.whitelist, newConfig.admin, logger, whitelistService,
+        processManager, networkBanService, vanillaWhitelist, rootCommand, dataDir, adminAuth, adminSessions, this);
     this.whitelistHttpServer.start();
     this.playerEvents = new PlayerEvents(this, proxy, newConfig, processManager, logger,
         whitelistService, vanillaWhitelist, networkBanService);
     proxy.getEventManager().register(this, playerEvents);
     if (rootCommand != null) {
-      rootCommand.updateState(processManager, newConfig, whitelistService, vanillaWhitelist, networkBanService);
+      rootCommand.updateState(processManager, newConfig, whitelistService, vanillaWhitelist, networkBanService, adminAuth);
     }
   }
 

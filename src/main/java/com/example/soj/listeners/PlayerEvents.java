@@ -166,6 +166,8 @@ public final class PlayerEvents {
           isReadyCache.put(name, Boolean.FALSE);
           continue;
         }
+        // Assume not ready until a ping succeeds
+        isReadyCache.put(name, Boolean.FALSE);
         if (countPlayersOn(name) == 0 && !mgr.isHoldActive(name)) {
           scheduleStopIfServerEmpty(name);
         }

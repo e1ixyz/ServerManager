@@ -1,6 +1,13 @@
 package com.example.soj.whitelist;
 
 import com.example.soj.Config;
+import com.example.soj.ServerProcessManager;
+import com.example.soj.admin.AdminAuthService;
+import com.example.soj.admin.AdminRoutes;
+import com.example.soj.admin.AdminSessionManager;
+import com.example.soj.bans.NetworkBanService;
+import com.example.soj.commands.ServerManagerCmd;
+import com.example.soj.ServerManagerPlugin;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -18,18 +25,40 @@ import java.util.Objects;
 
 /**
  * Minimal web UI to redeem join codes and add players to the network whitelist.
+ * Also hosts the optional admin panel when enabled.
  */
 public final class WhitelistHttpServer {
 
+  private final Config fullCfg;
   private final Config.Whitelist cfg;
   private final Logger log;
   private final WhitelistService whitelist;
+  private final AdminRoutes adminRoutes;
   private HttpServer http;
 
-  public WhitelistHttpServer(Config.Whitelist cfg, Logger log, WhitelistService whitelist) {
+  public WhitelistHttpServer(Config fullCfg,
+                             Config.Whitelist cfg,
+                             Config.Admin adminCfg,
+                             Logger log,
+                             WhitelistService whitelist,
+                             ServerProcessManager mgr,
+                             NetworkBanService networkBans,
+                             VanillaWhitelistChecker vanillaWhitelist,
+                             ServerManagerCmd cmd,
+                             java.nio.file.Path dataDir,
+                             AdminAuthService adminAuth,
+                             AdminSessionManager adminSessions,
+                             ServerManagerPlugin plugin) throws IOException {
+    this.fullCfg = fullCfg;
     this.cfg = cfg;
     this.log = log;
     this.whitelist = whitelist;
+    if (adminCfg != null && adminCfg.enabled && adminAuth != null && adminSessions != null) {
+      this.adminRoutes = new AdminRoutes(
+          fullCfg, log, adminAuth, adminSessions, mgr, whitelist, vanillaWhitelist, networkBans, cmd, plugin);
+    } else {
+      this.adminRoutes = null;
+    }
   }
 
   public void start() throws IOException {
@@ -39,6 +68,12 @@ public final class WhitelistHttpServer {
     InetSocketAddress addr = new InetSocketAddress(cfg.bind, cfg.port);
     http = HttpServer.create(addr, 0);
     http.createContext("/", this::handleRoot);
+    if (adminRoutes != null) {
+      http.createContext("/admin", this::handleAdmin);
+      http.createContext("/admin/", this::handleAdmin);
+      http.createContext("/admin/login", this::handleAdmin);
+      http.createContext("/admin/api/action", this::handleAdmin);
+    }
     http.setExecutor(null);
     http.start();
     log.info("Whitelist web server listening on {}:{} (url: {})", cfg.bind, cfg.port, cfg.baseUrl);
@@ -49,6 +84,16 @@ public final class WhitelistHttpServer {
       http.stop(0);
       http = null;
       log.info("Whitelist web server stopped.");
+    }
+  }
+
+  private void handleAdmin(HttpExchange ex) throws IOException {
+    if (adminRoutes == null) {
+      sendPlain(ex, 404, "Not Found");
+      return;
+    }
+    if (!adminRoutes.handle(ex)) {
+      sendPlain(ex, 404, "Not Found");
     }
   }
 

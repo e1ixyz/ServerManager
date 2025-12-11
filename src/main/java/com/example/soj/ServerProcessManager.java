@@ -3,6 +3,9 @@ package com.example.soj;
 import org.slf4j.Logger;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -11,13 +14,16 @@ public final class ServerProcessManager {
   private final Map<String, Long> holdUntilMs = new HashMap<>();
   private volatile Config cfg;
   private final Logger log;
+  private final Path holdFile;
 
-  public ServerProcessManager(Config cfg, Logger log) {
+  public ServerProcessManager(Config cfg, Logger log, Path dataDir) {
     this.cfg = cfg;
     this.log = log;
+    this.holdFile = dataDir == null ? null : dataDir.resolve("holds.txt");
     for (var e : cfg.servers.entrySet()) {
       servers.put(e.getKey(), new ManagedServer(e.getKey(), e.getValue(), log));
     }
+    loadForeverHolds();
   }
 
   public String primary() { return cfg.primaryServerName(); }
@@ -39,11 +45,13 @@ public final class ServerProcessManager {
   public synchronized long hold(String name, long durationSeconds) {
     if (durationSeconds <= 0) {
       holdUntilMs.remove(name);
+      persistForeverHolds();
       return 0L;
     }
     get(name); // validate server exists
     if (durationSeconds == Long.MAX_VALUE) {
       holdUntilMs.put(name, Long.MAX_VALUE);
+      persistForeverHolds();
       return Long.MAX_VALUE;
     }
     long now = System.currentTimeMillis();
@@ -62,7 +70,9 @@ public final class ServerProcessManager {
   }
 
   public synchronized boolean clearHold(String name) {
-    return holdUntilMs.remove(name) != null;
+    boolean removed = holdUntilMs.remove(name) != null;
+    if (removed) persistForeverHolds();
+    return removed;
   }
 
   public synchronized boolean isHoldActive(String name) {
@@ -124,6 +134,7 @@ public final class ServerProcessManager {
     servers.clear();
     servers.putAll(updated);
     holdUntilMs.keySet().retainAll(updated.keySet());
+    persistForeverHolds();
     this.cfg = newCfg;
   }
 
@@ -131,5 +142,39 @@ public final class ServerProcessManager {
     var s = servers.get(name);
     if (s == null) throw new IllegalArgumentException("Unknown server: " + name);
     return s;
+  }
+
+  private void persistForeverHolds() {
+    if (holdFile == null) return;
+    try {
+      var forever = holdUntilMs.entrySet().stream()
+          .filter(e -> e.getValue() != null && e.getValue() == Long.MAX_VALUE)
+          .map(Map.Entry::getKey)
+          .sorted(String.CASE_INSENSITIVE_ORDER)
+          .toList();
+      if (holdFile.getParent() != null) Files.createDirectories(holdFile.getParent());
+      StringBuilder sb = new StringBuilder();
+      for (String name : forever) {
+        sb.append(name).append('\n');
+      }
+      Files.writeString(holdFile, sb.toString(), StandardCharsets.UTF_8);
+    } catch (Exception ex) {
+      log.warn("Failed to persist hold state", ex);
+    }
+  }
+
+  private void loadForeverHolds() {
+    if (holdFile == null || !Files.exists(holdFile)) return;
+    try {
+      for (String line : Files.readAllLines(holdFile, StandardCharsets.UTF_8)) {
+        String trimmed = line == null ? "" : line.trim();
+        if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+        if (servers.containsKey(trimmed)) {
+          holdUntilMs.put(trimmed, Long.MAX_VALUE);
+        }
+      }
+    } catch (Exception ex) {
+      log.warn("Failed to load hold state", ex);
+    }
   }
 }
