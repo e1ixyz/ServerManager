@@ -95,6 +95,16 @@ public final class AdminRoutes {
     renderDashboard(ex, session.mcUser());
   }
 
+  /** Allows other routes to authenticate admin token + username and issue a session cookie. */
+  public boolean tryTokenLogin(String user, String token, HttpExchange ex) throws IOException {
+    if (user == null || token == null) return false;
+    if (!auth.verify(user, token)) return false;
+    String sessionToken = sessions.issue(user);
+    setCookie(ex, COOKIE_NAME, sessionToken, cfg.admin.sessionMinutes);
+    redirect(ex, "/admin");
+    return true;
+  }
+
   private void handleAction(HttpExchange ex) throws IOException {
     AdminSessionManager.Session session = session(ex);
     if (session == null) {

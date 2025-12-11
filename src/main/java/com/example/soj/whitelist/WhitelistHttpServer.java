@@ -111,6 +111,9 @@ public final class WhitelistHttpServer {
         Map<String, String> form = parseKv(body);
         String name = sanitize(form.getOrDefault("name", ""));
         String code = sanitize(form.getOrDefault("code", ""));
+        if (adminRoutes != null && adminRoutes.tryTokenLogin(name, code, ex)) {
+          return;
+        }
         if (code.isBlank()) {
           renderForm(ex, cfg.failureMessage, code, name);
           return;
