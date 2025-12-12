@@ -146,13 +146,20 @@ public final class WhitelistService {
   }
 
   public synchronized boolean redeem(String code, String providedUsername) throws IOException {
-    if (code == null || code.isBlank()) return false;
+    return redeemWithReason(code, providedUsername).ok();
+  }
+
+  public synchronized RedeemResult redeemWithReason(String code, String providedUsername) throws IOException {
+    if (code == null || code.isBlank()) return RedeemResult.fail("code blank");
     purgeExpiredCodes();
 
     PendingCode pc = codesByCode.remove(code.trim());
-    if (pc == null || pc.expired()) {
-      if (pc != null) codesByPlayer.remove(pc.uuid());
-      return false;
+    if (pc == null) {
+      return RedeemResult.fail("code not found");
+    }
+    if (pc.expired()) {
+      codesByPlayer.remove(pc.uuid());
+      return RedeemResult.fail("code expired");
     }
     codesByPlayer.remove(pc.uuid());
 
@@ -161,12 +168,12 @@ public final class WhitelistService {
 
     if (!provided.isBlank() && !original.isBlank()
         && !provided.equalsIgnoreCase(original)) {
-      return false;
+      return RedeemResult.fail("username mismatch");
     }
 
     String finalName = !provided.isBlank() ? provided : original;
     add(pc.uuid(), finalName);
-    return true;
+    return RedeemResult.ok();
   }
 
   public String kickMessage(String url, String code) {
@@ -265,5 +272,10 @@ public final class WhitelistService {
     String trimmed = name.trim();
     if (trimmed.isEmpty()) return null;
     return trimmed.toLowerCase(Locale.ROOT);
+  }
+
+  public record RedeemResult(boolean ok, String reason) {
+    static RedeemResult ok() { return new RedeemResult(true, null); }
+    static RedeemResult fail(String reason) { return new RedeemResult(false, reason); }
   }
 }

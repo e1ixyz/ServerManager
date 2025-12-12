@@ -118,10 +118,11 @@ public final class WhitelistHttpServer {
           renderForm(ex, cfg.failureMessage, code, name);
           return;
         }
-        boolean ok = whitelist.redeem(code, name);
-        if (ok) {
+        var result = whitelist.redeemWithReason(code, name);
+        if (result.ok()) {
           renderSuccess(ex, name.isBlank() ? null : name);
         } else {
+          log.warn("Whitelist redeem failed for user '{}' code '{}': {}", name, code, result.reason());
           renderForm(ex, cfg.failureMessage, "", name);
         }
         return;

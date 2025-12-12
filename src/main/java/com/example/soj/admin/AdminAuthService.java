@@ -81,7 +81,7 @@ public final class AdminAuthService {
 
   private String normalize(String user) {
     if (user == null) return null;
-    String s = user.trim();
+    String s = user.trim().toLowerCase(Locale.ROOT);
     return s.isEmpty() ? null : s;
   }
 
