@@ -173,7 +173,7 @@ public final class WhitelistService {
 
     String finalName = !provided.isBlank() ? provided : original;
     add(pc.uuid(), finalName);
-    return RedeemResult.ok();
+    return RedeemResult.success();
   }
 
   public String kickMessage(String url, String code) {
@@ -275,7 +275,7 @@ public final class WhitelistService {
   }
 
   public record RedeemResult(boolean ok, String reason) {
-    static RedeemResult ok() { return new RedeemResult(true, null); }
-    static RedeemResult fail(String reason) { return new RedeemResult(false, reason); }
+    public static RedeemResult success() { return new RedeemResult(true, null); }
+    public static RedeemResult fail(String reason) { return new RedeemResult(false, reason); }
   }
 }
