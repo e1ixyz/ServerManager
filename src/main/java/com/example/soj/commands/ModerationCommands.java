@@ -2,6 +2,7 @@ package com.example.soj.commands;
 
 import com.example.soj.Config;
 import com.example.soj.moderation.ModerationService;
+import com.example.soj.whitelist.WhitelistService;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
@@ -30,18 +31,21 @@ public final class ModerationCommands implements SimpleCommand {
   private final ProxyServer proxy;
   private volatile Config cfg;
   private volatile ModerationService moderation;
+  private volatile WhitelistService whitelist;
   private final Logger log;
 
-  public ModerationCommands(ProxyServer proxy, Config cfg, ModerationService moderation, Logger log) {
+  public ModerationCommands(ProxyServer proxy, Config cfg, ModerationService moderation, WhitelistService whitelist, Logger log) {
     this.proxy = proxy;
     this.cfg = cfg;
     this.moderation = moderation;
+    this.whitelist = whitelist;
     this.log = log;
   }
 
-  public void updateState(Config cfg, ModerationService moderation) {
+  public void updateState(Config cfg, ModerationService moderation, WhitelistService whitelist) {
     this.cfg = cfg;
     this.moderation = moderation;
+    this.whitelist = whitelist;
   }
 
   @Override
@@ -318,6 +322,12 @@ public final class ModerationCommands implements SimpleCommand {
       uuid = p.getUniqueId();
       name = p.getUsername();
       ip = remoteIp(p);
+    } else if (whitelist != null) {
+      var entry = whitelist.lookup(null, raw);
+      if (entry.isPresent()) {
+        uuid = entry.get().uuid();
+        name = entry.get().lastKnownName();
+      }
     }
     return new Target(uuid, name, ip);
   }
