@@ -236,9 +236,14 @@ public final class PlayerEvents {
     Player joining = e.getPlayer();
     cancelPendingConnect(joining.getUniqueId()); // clear any previous wait
 
-    if (isBanned(joining, true)) {
-      e.setResult(LoginEvent.ComponentResult.denied(Component.empty()));
-      return;
+    if (moderation != null && moderation.enabled()) {
+      var ban = moderation.findBan(joining.getUniqueId(), remoteIp(joining));
+      if (ban != null) {
+        Component msg = buildModerationMessage(cfg.messages.bannedMessage, joining.getUsername(), ban);
+        e.setResult(LoginEvent.ComponentResult.denied(msg));
+        log.info("Denied {} (banned) at login.", joining.getUsername());
+        return;
+      }
     }
 
     if (!hasNetworkAccess(joining)) {
