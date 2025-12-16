@@ -11,8 +11,9 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
 - Admin hold command (`/sm hold`) keeps a backend online for a set window even when it is empty.
 - Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
 - Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve web onboarding.
-- In-game `/sm whitelist` tooling to view/add/remove entries from both the network whitelist and any managed vanilla `whitelist.json`, plus `/sm networkban` to enforce proxy-wide bans so blocked players can't even wake backend servers.
-- Optional auto-restart interval for servers held indefinitely, with 1-minute and 5-second warnings broadcast in-game.
+- Built-in moderation: `/ban`, `/ipban`, `/unban`, `/mute`, `/unmute`, `/warn`, plus `/banlist`, `/mutelist`, `/warnlist`. Banned players are blocked at login so they cannot start backends.
+- In-game `/sm whitelist` tooling to view/add/remove entries from both the network whitelist and any managed vanilla `whitelist.json`.
+- Optional daily auto-restart time for servers held indefinitely, with 1-minute and 5-second warnings broadcast in-game.
 
 ## Requirements
 - Java 17+
@@ -86,7 +87,9 @@ messages:
   statusLine:     "<white><server></white>: <state>"
   stateOnline:    "<green>online</green>"
   stateOffline:   "<red>offline</red>"
-  networkBanned:  "<red>You are banned from this network.</red><newline><gray>Reason: <reason></gray>"
+  bannedMessage:  "<red>You are banned.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>"
+  mutedMessage:   "<red>You are muted.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>"
+  warnMessage:    "<yellow>You have been warned: <reason></yellow>"
 
 servers:
   lobby:
@@ -127,9 +130,9 @@ whitelist:
   failureMessage: "Invalid or expired code. Please try again from in-game."
   buttonText: "Verify & Whitelist"
 
-banlist:
+moderation:
   enabled: true
-  dataFile: "network-bans.yml"
+  dataFile: "moderation.yml"
 
 forcedHosts: {}
 ```
@@ -144,7 +147,7 @@ Key points:
 - `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
 - Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a short URL and one-time code and can redeem it through the built-in HTTP form.
 - `allowVanillaBypass: true` remains the default for the primary backend when the per-server flag is not set. Set it to `false` if you want even the primary server to ignore its vanilla whitelist entirely.
-- `banlist:` controls the proxy-level network ban registry used by `/sm networkban`. When `enabled` is true (default) banned players are denied before backend processes even start. Change `dataFile` to relocate the YAML store.
+- `moderation:` controls the proxy-level moderation registry used by the standalone `/ban`, `/ipban`, `/mute`, `/warn`, and list commands. When enabled (default) bans are enforced at login, before any backend starts.
 
 ## Network Whitelist Flow
 1. Player joins Velocity.
@@ -210,7 +213,6 @@ Root command aliases: `/servermanager`, `/sm`
 | `hold`     | `servermanager.command.hold`                | Keeps the backend running for the requested duration (accepts `30m`, `2h`, `1h30m`, or `forever`). Starts the server automatically if it is offline. |
 | `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
 | `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`, and toggles vanilla whitelist enforcement per server. |
-| `networkban` | `servermanager.command.networkban`        | Lists bans and adds/removes proxy-wide bans so blocked players can't start backend servers. |
 
 Durations default to minutes when no unit is supplied. Use `forever` for an indefinite hold. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early. When a server is held forever and `autoRestartHoldTime` is set (HH:mm), it will automatically restart at that daily time with in-game warnings at 1 minute and 5 seconds.
 
@@ -225,10 +227,14 @@ Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for 
 - `vanilla <server> list` dumps the current contents of that backend's `whitelist.json`. `vanilla <server> add <player|uuid> [name]` accepts either a UUID/online player or just a username (UUID preferred). Removals accept UUIDs or names as well, and active backends also receive a live `/whitelist add|remove ...` command for immediate effect. Use `vanilla <server> on|off|status` to enable/disable or query the backend's vanilla whitelist (writes `server.properties` and sends `/whitelist on|off` when online).
 - UUID arguments may omit dashes. When only a UUID is supplied the plugin tries to reuse the last known username from the network whitelist, ban list, or live player list.
 
-### Network bans (`/sm networkban`)
-- `list` shows the most recent bans (20 at a time) along with their stored reason.
-- `add <player|uuid> [reason…]` writes the entry to `network-bans.yml`, removes the user from the network + mirrored vanilla whitelists, and disconnects them immediately if they are online. Banned players are rejected at login before backend servers start.
-- `remove <player|uuid>` deletes the ban entry.
+### Moderation commands (standalone)
+- `/ban <player> [duration] [reason]` — bans by UUID; duration accepts `1d`, `2h30m`, or `forever` (default permanent). Kicks immediately.
+- `/ipban <player|ip> [duration] [reason]` — bans by IP; if a player is online their current IP is used. Kicks immediately when online.
+- `/unban <player|ip>` — removes UUID/IP bans.
+- `/mute <player> [duration] [reason]` and `/unmute <player>` — mutes block chat and surface a clear muted message with expiry.
+- `/warn <player> [reason]` — records a warn and notifies the player.
+- `/banlist`, `/mutelist`, `/warnlist` — show the most recent 20 entries with expiry info.
+Permissions: `servermanager.moderation.ban`, `.ipban`, `.unban`, `.mute`, `.unmute`, `.warn`, `.view` (lists). Console bypasses checks. Bans are enforced at login, before any backend starts.
 
 ## Logging
 - Velocity logs key lifecycle actions: process starts, stop scheduling, cancellations, timeouts, and migration messages.

@@ -2,12 +2,13 @@ package com.example.soj.listeners;
 
 import com.example.soj.Config;
 import com.example.soj.ServerProcessManager;
-import com.example.soj.bans.NetworkBanService;
+import com.example.soj.moderation.ModerationService;
 import com.example.soj.whitelist.VanillaWhitelistChecker;
 import com.example.soj.whitelist.WhitelistService;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.LoginEvent;
+import com.velocitypowered.api.event.player.PlayerChatEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.event.player.ServerPreConnectEvent;
 import com.velocitypowered.api.event.proxy.ProxyPingEvent;
@@ -52,7 +53,7 @@ public final class PlayerEvents {
   private final Logger log;
   private final WhitelistService whitelist;
   private final VanillaWhitelistChecker vanillaWhitelist;
-  private final NetworkBanService networkBans;
+  private final ModerationService moderation;
   private final Config.Whitelist whitelistCfg;
   private final Map<String, Config.ForcedHost> forcedHostOverrides;
   private final Set<String> vanillaBypassServers;
@@ -100,7 +101,7 @@ public final class PlayerEvents {
       Logger log,
       WhitelistService whitelist,
       VanillaWhitelistChecker vanillaWhitelist,
-      NetworkBanService networkBans
+      ModerationService moderation
   ) {
     this.pluginOwner = pluginOwner;
     this.proxy = proxy;
@@ -109,7 +110,7 @@ public final class PlayerEvents {
     this.log = log;
     this.whitelist = whitelist;
     this.vanillaWhitelist = vanillaWhitelist;
-    this.networkBans = networkBans;
+    this.moderation = moderation;
     this.whitelistCfg = (whitelist != null) ? whitelist.config() : null;
     this.forcedHostOverrides = new HashMap<>();
     if (cfg.forcedHosts != null) {
@@ -235,7 +236,7 @@ public final class PlayerEvents {
     Player joining = e.getPlayer();
     cancelPendingConnect(joining.getUniqueId()); // clear any previous wait
 
-    if (isNetworkBanned(joining, true)) {
+    if (isBanned(joining, true)) {
       e.setResult(LoginEvent.ComponentResult.denied(Component.empty()));
       return;
     }
@@ -244,6 +245,18 @@ public final class PlayerEvents {
       handleNotWhitelisted(joining, true);
       e.setResult(LoginEvent.ComponentResult.denied(Component.empty()));
     }
+  }
+
+  // -------------- Chat moderation --------------
+  @Subscribe
+  public void onChat(PlayerChatEvent e) {
+    if (moderation == null || !moderation.enabled()) return;
+    Player player = e.getPlayer();
+    var mute = moderation.findMute(player.getUniqueId());
+    if (mute == null) return;
+    Component msg = buildModerationMessage(cfg.messages.mutedMessage, player.getUsername(), mute);
+    e.setResult(PlayerChatEvent.ChatResult.denied());
+    player.sendMessage(msg);
   }
 
   // -------------- Gate all connects (/server <target>, menu join, etc.) --------------
@@ -256,7 +269,7 @@ public final class PlayerEvents {
     if (!mgr.isKnown(target)) return; // only manage servers present in our config
 
     Player player = event.getPlayer();
-    if (isNetworkBanned(player, true)) {
+    if (isBanned(player, true)) {
       event.setResult(ServerPreConnectEvent.ServerResult.denied());
       return;
     }
@@ -702,7 +715,7 @@ public final class PlayerEvents {
   }
 
   private boolean hasNetworkAccess(Player player) {
-    if (isNetworkBanned(player, true)) {
+    if (isBanned(player, true)) {
       return false;
     }
     if (!whitelistEnabled()) return true;
@@ -759,18 +772,17 @@ public final class PlayerEvents {
     return whitelist != null && whitelist.enabled();
   }
 
-  private boolean isNetworkBanned(Player player, boolean disconnect) {
-    if (networkBans == null || !networkBans.enabled()) return false;
-    var entry = networkBans.lookup(player.getUniqueId(), player.getUsername());
-    if (entry.isEmpty()) return false;
-    Component msg = mmReason(firstNonBlank(cfg.messages.networkBanned, "<red>You are banned from this network.</red>"),
-        player.getUsername(), entry.get().reason());
+  private boolean isBanned(Player player, boolean disconnect) {
+    if (moderation == null || !moderation.enabled()) return false;
+    var entry = moderation.findBan(player.getUniqueId(), remoteIp(player));
+    if (entry == null) return false;
+    Component msg = buildModerationMessage(cfg.messages.bannedMessage, player.getUsername(), entry);
     if (disconnect) {
       player.disconnect(msg);
     } else {
       player.sendMessage(msg);
     }
-    log.info("Denied {} (network banned).", player.getUsername());
+    log.info("Denied {} (banned).", player.getUsername());
     return true;
   }
 
@@ -900,11 +912,61 @@ public final class PlayerEvents {
         Placeholder.unparsed("player", player == null ? "" : player));
   }
 
-  private static Component mmReason(String template, String player, String reason) {
-    String t = normalizePlaceholders(template);
+  private Component buildModerationMessage(String template, String player, ModerationService.Entry entry) {
+    String t = normalizePlaceholders(firstNonBlank(template, "<red>You cannot join.</red>"));
+    String reason = firstNonBlank(entry.reason(), "No reason specified");
+    String expiry = entry.expiresAt() > 0 ? formatDuration(secondsUntil(entry.expiresAt())) : "never";
     return MiniMessage.miniMessage().deserialize(t,
         Placeholder.unparsed("player", player == null ? "" : player),
-        Placeholder.unparsed("reason", reason == null ? "" : reason));
+        Placeholder.unparsed("reason", reason),
+        Placeholder.unparsed("expiry", expiry));
+  }
+
+  private long secondsUntil(long millisEpoch) {
+    long now = System.currentTimeMillis();
+    if (millisEpoch <= now) return 0L;
+    return (millisEpoch - now) / 1000L;
+  }
+
+  private static String formatDuration(long seconds) {
+    if (seconds <= 0L) return "0s";
+    long remaining = seconds;
+    long days = remaining / 86400L;
+    remaining %= 86400L;
+    long hours = remaining / 3600L;
+    remaining %= 3600L;
+    long minutes = remaining / 60L;
+    long secs = remaining % 60L;
+
+    StringBuilder sb = new StringBuilder();
+    appendUnit(sb, days, 'd');
+    appendUnit(sb, hours, 'h');
+    appendUnit(sb, minutes, 'm');
+    if (sb.length() == 0 || days == 0 && hours == 0 && minutes == 0) {
+      appendUnit(sb, secs, 's');
+    } else if (secs > 0) {
+      appendUnit(sb, secs, 's');
+    }
+    return sb.toString().trim();
+  }
+
+  private static void appendUnit(StringBuilder sb, long value, char suffix) {
+    if (value <= 0) return;
+    if (sb.length() > 0) sb.append(' ');
+    sb.append(value).append(suffix);
+  }
+
+  private String remoteIp(Player player) {
+    try {
+      var addr = player.getRemoteAddress();
+      if (addr instanceof java.net.InetSocketAddress) {
+        java.net.InetSocketAddress inet = (java.net.InetSocketAddress) addr;
+        if (inet.getAddress() != null) {
+          return inet.getAddress().getHostAddress();
+        }
+      }
+    } catch (Exception ignored) {}
+    return null;
   }
 
   public void shutdown() {

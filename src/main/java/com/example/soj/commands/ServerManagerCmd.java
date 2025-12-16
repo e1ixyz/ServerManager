@@ -3,7 +3,7 @@ package com.example.soj.commands;
 import com.example.soj.Config;
 import com.example.soj.ServerManagerPlugin;
 import com.example.soj.ServerProcessManager;
-import com.example.soj.bans.NetworkBanService;
+import com.example.soj.moderation.ModerationService;
 import com.example.soj.whitelist.VanillaWhitelistChecker;
 import com.example.soj.whitelist.WhitelistService;
 import com.velocitypowered.api.command.CommandSource;
@@ -11,9 +11,6 @@ import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.event.ClickEvent;
-import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.slf4j.Logger;
@@ -42,39 +39,32 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final String[] PERM_START = {"servermanager.command.start", "servermanager.start"};
   private static final String[] PERM_STOP = {"servermanager.command.stop", "servermanager.stop"};
   private static final String[] PERM_HOLD = {"servermanager.command.hold", "servermanager.hold"};
-  private static final String[] PERM_ADMINAUTH = {"servermanager.command.adminauth", "servermanager.adminauth"};
   private static final String[] PERM_RELOAD = {"servermanager.command.reload", "servermanager.reload"};
   private static final String[] PERM_WHITELIST = {"servermanager.command.whitelist", "servermanager.whitelist"};
-  private static final String[] PERM_NETBAN = {"servermanager.command.networkban", "servermanager.networkban"};
   private static final String[] PERM_HELP = {"servermanager.command.help", "servermanager.help"};
   private static final Pattern DURATION_TOKEN = Pattern.compile("(?i)(\\d+)([dhms]?)");
   private static final long HOLD_FOREVER = Long.MAX_VALUE;
   private static final String WL_USAGE = "<gray>Usage:</gray> <white>/sm whitelist <green>network</green>|<green>vanilla</green> …</white>";
   private static final String WL_NETWORK_USAGE = "<gray>Usage:</gray> <white>/sm whitelist network <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
   private static final String WL_VANILLA_USAGE = "<gray>Usage:</gray> <white>/sm whitelist vanilla <server> <green>list</green>|<green>add</green>|<green>remove</green>|<green>on</green>|<green>off</green>|<green>status</green> …</white>";
-  private static final String NETBAN_USAGE = "<gray>Usage:</gray> <white>/sm networkban <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
   private static final SubcommandMeta CMD_STATUS = command("status", PERM_STATUS);
   private static final SubcommandMeta CMD_START = command("start", PERM_START);
   private static final SubcommandMeta CMD_STOP = command("stop", PERM_STOP);
   private static final SubcommandMeta CMD_HOLD = command("hold", PERM_HOLD);
-  private static final SubcommandMeta CMD_ADMINAUTH = command("adminauth", new String[]{"servermanager.command.adminauth", "servermanager.adminauth"});
   private static final SubcommandMeta CMD_RELOAD = command("reload", PERM_RELOAD);
   private static final SubcommandMeta CMD_WHITELIST = command("whitelist", PERM_WHITELIST);
-  private static final SubcommandMeta CMD_NETBAN = command("networkban", PERM_NETBAN, "netban");
   private static final SubcommandMeta CMD_HELP = command("help", PERM_HELP);
   private static final List<SubcommandMeta> SUBCOMMANDS = List.of(
-      CMD_STATUS, CMD_START, CMD_STOP, CMD_HOLD, CMD_ADMINAUTH, CMD_RELOAD, CMD_WHITELIST, CMD_NETBAN, CMD_HELP
+      CMD_STATUS, CMD_START, CMD_STOP, CMD_HOLD, CMD_RELOAD, CMD_WHITELIST, CMD_HELP
   );
   private static final List<HelpEntry> HELP_ENTRIES = List.of(
       help(CMD_STATUS, "<white>/sm status</white> <gray>- View the state of all managed servers.</gray>"),
       help(CMD_START, "<white>/sm start [server]</white> <gray>- Start a managed server manually.</gray>"),
       help(CMD_STOP, "<white>/sm stop [server]</white> <gray>- Stop a running managed server.</gray>"),
       help(CMD_HOLD, "<white>/sm hold [server] [duration|forever|clear]</white> <gray>- Hold a server online or clear the hold.</gray>"),
-      help(CMD_ADMINAUTH, "<white>/sm adminauth [player]</white> <gray>- Provision/reset an admin token for the web panel.</gray>"),
       help(CMD_RELOAD, "<white>/sm reload</white> <gray>- Reload ServerManager config and listeners.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist network <list|add|remove></white> <gray>- Manage the shared network whitelist.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist vanilla [server] <list|add|remove|on|off|status></white> <gray>- Manage vanilla whitelist settings per backend.</gray>"),
-      help(CMD_NETBAN, "<white>/sm networkban|netban <list|add|remove></white> <gray>- View or update network bans.</gray>"),
       help(CMD_HELP, "<white>/sm help</white> <gray>- Show this staff help menu.</gray>")
   );
   private static final List<String> HOLD_KEYWORDS = List.of("clear", "cancel", "off", "remove");
@@ -82,7 +72,6 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final List<String> WHITELIST_SCOPES = List.of("network", "vanilla");
   private static final List<String> NETWORK_WL_ACTIONS = List.of("list", "add", "remove", "delete");
   private static final List<String> VANILLA_WL_ACTIONS = List.of("list", "add", "remove", "on", "off", "enable", "disable", "status", "state");
-  private static final List<String> NETBAN_ACTIONS = List.of("list", "add", "remove", "delete", "unban");
   private static SubcommandMeta command(String primary, String[] perms, String... aliases) {
     List<String> triggers = new ArrayList<>();
     triggers.add(primary);
@@ -120,8 +109,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   private volatile Config cfg;
   private volatile WhitelistService whitelist;
   private volatile VanillaWhitelistChecker vanillaWhitelist;
-  private volatile NetworkBanService networkBans;
-  private volatile com.example.soj.admin.AdminAuthService adminAuth;
+  private volatile ModerationService moderation;
   private final Logger log;
   private final ServerManagerPlugin plugin;
   private final ProxyServer proxy;
@@ -333,97 +321,14 @@ public final class ServerManagerCmd implements SimpleCommand {
     }
   }
 
-  private void handleNetworkBanCommand(CommandSource src, String[] args) {
-    if (networkBans == null) {
-      src.sendMessage(Component.text("Network ban storage is not initialized."));
-      return;
-    }
-    if (args.length == 0) {
-      src.sendMessage(mm0(NETBAN_USAGE));
-      return;
-    }
-    String action = args[0].toLowerCase(Locale.ROOT);
-    switch (action) {
-      case "list" -> {
-        List<NetworkBanService.Entry> entries = new ArrayList<>(networkBans.entries());
-        entries.sort(Comparator.comparing(NetworkBanService.Entry::bannedAt).reversed());
-        src.sendMessage(Component.text("Network bans (" + entries.size() + "):"));
-        int limit = Math.min(entries.size(), 20);
-        for (int i = 0; i < limit; i++) {
-          var entry = entries.get(i);
-          String line = " - " + displayName(entry.lastKnownName(), entry.uuid());
-          if (entry.reason() != null && !entry.reason().isBlank()) {
-            line += " [" + entry.reason() + "]";
-          }
-          src.sendMessage(Component.text(line));
-        }
-        if (entries.size() > limit) {
-          src.sendMessage(Component.text(" …and " + (entries.size() - limit) + " more."));
-        }
-      }
-      case "add" -> {
-        if (args.length < 2) {
-          src.sendMessage(mm0(NETBAN_USAGE));
-          return;
-        }
-        Target target = resolveUuidTarget(args[1], args.length >= 3 ? args[2] : null);
-        if (target == null || target.uuid() == null) {
-          src.sendMessage(Component.text("Player must be online or specify a UUID."));
-          return;
-        }
-        String reason = args.length >= 3 ? joinArgs(args, 2) : "Banned by " + nameOf(src);
-        try {
-          networkBans.ban(target.uuid(), target.name(), reason, nameOf(src));
-        } catch (IOException ex) {
-          log.error("Failed to add network ban", ex);
-          src.sendMessage(Component.text("Failed to update ban list: " + ex.getMessage()));
-          return;
-        }
-        if (whitelist != null) {
-          try {
-            whitelist.remove(target.uuid(), target.name());
-          } catch (IOException ex) {
-            log.warn("Failed to remove {} from whitelist while banning", target.name(), ex);
-          }
-        }
-        plugin.removeNetworkWhitelistEntry(target.uuid(), target.name());
-        proxy.getPlayer(target.uuid()).ifPresent(p -> p.disconnect(mmReason(firstNonBlank(cfg.messages.networkBanned, "<red>You are banned.</red>"), p.getUsername(), reason)));
-        src.sendMessage(Component.text("Banned " + displayName(target.name(), target.uuid()) + " for: " + reason));
-      }
-      case "remove", "delete", "unban" -> {
-        if (args.length < 2) {
-          src.sendMessage(mm0(NETBAN_USAGE));
-          return;
-        }
-        UUID uuid = parseUuidFlexible(args[1]);
-        String nameHint = uuid == null ? args[1] : null;
-        Optional<NetworkBanService.Entry> before = networkBans.lookup(uuid, nameHint);
-        if (before.isEmpty()) {
-          src.sendMessage(Component.text("No network ban found for that player."));
-          return;
-        }
-        try {
-          networkBans.unban(uuid, nameHint);
-        } catch (IOException ex) {
-          log.error("Failed to remove network ban", ex);
-          src.sendMessage(Component.text("Failed to update ban list: " + ex.getMessage()));
-          return;
-        }
-        src.sendMessage(Component.text("Unbanned " + displayName(before.get().lastKnownName(), before.get().uuid()) + "."));
-      }
-      default -> src.sendMessage(mm0(NETBAN_USAGE));
-    }
-  }
   public void updateState(ServerProcessManager mgr, Config cfg,
                           WhitelistService whitelist, VanillaWhitelistChecker vanillaWhitelist,
-                          NetworkBanService networkBans,
-                          com.example.soj.admin.AdminAuthService adminAuth) {
+                          ModerationService moderation) {
     this.mgr = mgr;
     this.cfg = cfg;
     this.whitelist = whitelist;
     this.vanillaWhitelist = vanillaWhitelist;
-    this.networkBans = networkBans;
-    this.adminAuth = adminAuth;
+    this.moderation = moderation;
   }
 
   @Override
@@ -570,25 +475,6 @@ public final class ServerManagerCmd implements SimpleCommand {
         long remaining = manager.holdRemainingSeconds(server);
         src.sendMessage(mmDuration(firstNonBlank(config.messages.holdSet, config.messages.holdStatus), server, playerName, formatDuration(remaining)));
       }
-      case "adminauth" -> {
-        if (!has(src, PERM_ADMINAUTH)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
-        if (adminAuth == null) { src.sendMessage(Component.text("Admin auth is not enabled in config.")); return; }
-        if (server == null) { src.sendMessage(Component.text("Usage: /sm adminauth <player>")); return; }
-        try {
-          var prov = adminAuth.provision(server);
-          Component secretLine = Component.text()
-              .append(Component.text("Admin token for ", NamedTextColor.GRAY))
-              .append(Component.text(server + ": ", NamedTextColor.WHITE))
-              .append(Component.text(prov.secret(), NamedTextColor.GOLD, TextDecoration.BOLD)
-                  .hoverEvent(Component.text("Click to copy"))
-                  .clickEvent(ClickEvent.copyToClipboard(prov.secret())))
-              .build();
-          src.sendMessage(secretLine);
-        } catch (Exception ex) {
-          log.error("Failed to provision admin auth", ex);
-          src.sendMessage(Component.text("Failed to provision: " + ex.getMessage()));
-        }
-      }
       case "reload" -> {
         if (!has(src, PERM_RELOAD)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
         Config previous = config;
@@ -606,13 +492,6 @@ public final class ServerManagerCmd implements SimpleCommand {
           return;
         }
         handleWhitelistCommand(src, tail(args, 1));
-      }
-      case "networkban", "netban" -> {
-        if (!has(src, PERM_NETBAN)) {
-          src.sendMessage(mm0(config.messages.noPermission));
-          return;
-        }
-        handleNetworkBanCommand(src, tail(args, 1));
       }
       default -> src.sendMessage(mm0(config.messages.usage));
     }
@@ -642,7 +521,6 @@ public final class ServerManagerCmd implements SimpleCommand {
       case "stop" -> suggestServers(args[1]);
       case "hold" -> suggestHold(args);
       case "whitelist" -> suggestWhitelist(args);
-      case "networkban" -> suggestNetworkBan(args);
       case "status", "reload", "help" -> List.of();
       default -> List.of();
     };
@@ -744,19 +622,6 @@ public final class ServerManagerCmd implements SimpleCommand {
     return List.of();
   }
 
-  private List<String> suggestNetworkBan(String[] args) {
-    if (args.length == 2) {
-      return filterOptions(NETBAN_ACTIONS, args[1]);
-    }
-    if (args.length == 3) {
-      String action = args[1];
-      if (equalsIgnoreCase(action, "add", "remove", "delete", "unban")) {
-        return suggestOnlinePlayers(args[2]);
-      }
-    }
-    return List.of();
-  }
-
   private List<String> suggestOnlinePlayers(String partial) {
     Collection<Player> players = proxy.getAllPlayers();
     if (players == null || players.isEmpty()) {
@@ -850,10 +715,6 @@ public final class ServerManagerCmd implements SimpleCommand {
     if (online.isPresent()) return online.get().getUsername();
     if (whitelist != null) {
       var entry = whitelist.lookup(uuid, null);
-      if (entry.isPresent() && entry.get().lastKnownName() != null) return entry.get().lastKnownName();
-    }
-    if (networkBans != null) {
-      var entry = networkBans.lookup(uuid, null);
       if (entry.isPresent() && entry.get().lastKnownName() != null) return entry.get().lastKnownName();
     }
     return null;

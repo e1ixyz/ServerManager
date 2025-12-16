@@ -20,8 +20,7 @@ public final class Config {
   public Map<String, ForcedHost> forcedHosts = new LinkedHashMap<>();
   public Messages messages = new Messages();
   public Whitelist whitelist = new Whitelist();
-  public Banlist banlist = new Banlist();
-  public Admin admin = new Admin();
+  public Moderation moderation = new Moderation();
 
   public static final class Motd {
     public String offline  = "<gray>Your Network</gray> <gray>- <white><server></white></gray>";
@@ -62,7 +61,9 @@ public final class Config {
     public String statusLine     = "<white><server></white>: <state>";
     public String stateOnline    = "<green>online</green>";
     public String stateOffline   = "<red>offline</red>";
-    public String networkBanned  = "<red>You are banned from this network.</red><newline><gray>Reason: <reason></gray>";
+    public String bannedMessage  = "<red>You are banned.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>";
+    public String mutedMessage   = "<red>You are muted.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>";
+    public String warnMessage    = "<yellow>You have been warned: <reason></yellow>";
   }
 
   public static final class Whitelist {
@@ -91,18 +92,9 @@ public final class Config {
     public String kickMessage;
   }
 
-  public static final class Banlist {
+  public static final class Moderation {
     public boolean enabled = true;
-    public String dataFile = "network-bans.yml";
-  }
-
-  public static final class Admin {
-    /** Enable the web admin panel (/admin on the web server). */
-    public boolean enabled = false;
-    /** Where to store admin TOTP secrets. */
-    public String authFile = "admin-auth.yml";
-    /** Session lifetime (minutes). */
-    public int sessionMinutes = 60;
+    public String dataFile = "moderation.yml";
   }
 
   public static Config loadOrCreateDefault(Path path, Logger log) throws Exception {
@@ -148,27 +140,30 @@ public final class Config {
           statusLine:     "<white><server></white>: <state>"
           stateOnline:    "<green>online</green>"
           stateOffline:   "<red>offline</red>"
+          bannedMessage:  "<red>You are banned.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>"
+          mutedMessage:   "<red>You are muted.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>"
+          warnMessage:    "<yellow>You have been warned: <reason></yellow>"
         servers:
           lobby:
             startOnJoin: true
             workingDir: "../lobby"
             startCommand: "./start.sh"
             stopCommand: "stop"
-          logToFile: true
-          logFile: "logs/proxy-managed-lobby.log"
-          vanillaWhitelistBypassesNetwork: true
-          mirrorNetworkWhitelist: true
-          autoRestartHoldTime: "05:00"
-        survival:
-          startOnJoin: false
-          workingDir: "../survival"
-          startCommand: "./start.sh"
-          stopCommand: "stop"
-          logToFile: true
-          logFile: "logs/proxy-managed-survival.log"
-          vanillaWhitelistBypassesNetwork: false
-          mirrorNetworkWhitelist: false
-          autoRestartHoldTime: ""
+            logToFile: true
+            logFile: "logs/proxy-managed-lobby.log"
+            vanillaWhitelistBypassesNetwork: true
+            mirrorNetworkWhitelist: true
+            autoRestartHoldTime: "05:00"
+          survival:
+            startOnJoin: false
+            workingDir: "../survival"
+            startCommand: "./start.sh"
+            stopCommand: "stop"
+            logToFile: true
+            logFile: "logs/proxy-managed-survival.log"
+            vanillaWhitelistBypassesNetwork: false
+            mirrorNetworkWhitelist: false
+            autoRestartHoldTime: ""
         whitelist:
           enabled: false
           bind: "0.0.0.0"
@@ -184,13 +179,9 @@ public final class Config {
           successMessage: "Success! You are now whitelisted. You may rejoin the server."
           failureMessage: "Invalid or expired code. Please try again from in-game."
           buttonText: "Verify & Whitelist"
-        banlist:
+        moderation:
           enabled: true
-          dataFile: "network-bans.yml"
-        admin:
-          enabled: false
-          authFile: "admin-auth.yml"
-          sessionMinutes: 60
+          dataFile: "moderation.yml"
         forcedHosts: {}
         """;
       Files.createDirectories(path.getParent());
@@ -222,8 +213,7 @@ public final class Config {
     if (cfg.motd == null) cfg.motd = new Motd();
     if (cfg.messages == null) cfg.messages = new Messages();
     if (cfg.whitelist == null) cfg.whitelist = new Whitelist();
-    if (cfg.banlist == null) cfg.banlist = new Banlist();
-    if (cfg.admin == null) cfg.admin = new Admin();
+    if (cfg.moderation == null) cfg.moderation = new Moderation();
     if (cfg.forcedHosts == null) cfg.forcedHosts = new LinkedHashMap<>();
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;

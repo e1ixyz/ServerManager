@@ -1,8 +1,8 @@
 package com.example.soj;
 
 import com.example.soj.commands.ServerManagerCmd;
-import com.example.soj.bans.NetworkBanService;
 import com.example.soj.listeners.PlayerEvents;
+import com.example.soj.moderation.ModerationService;
 import com.example.soj.whitelist.WhitelistHttpServer;
 import com.example.soj.whitelist.WhitelistService;
 import com.example.soj.whitelist.VanillaWhitelistChecker;
@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.UUID;
+import com.example.soj.commands.ModerationCommands;
 
 @Plugin(
   id = "servermanager",
@@ -36,11 +37,10 @@ public final class ServerManagerPlugin {
   private WhitelistService whitelistService;
   private WhitelistHttpServer whitelistHttpServer;
   private VanillaWhitelistChecker vanillaWhitelist;
-  private NetworkBanService networkBanService;
   private PlayerEvents playerEvents;
   private ServerManagerCmd rootCommand;
-  private com.example.soj.admin.AdminAuthService adminAuth;
-  private com.example.soj.admin.AdminSessionManager adminSessions;
+  private ModerationService moderation;
+  private ModerationCommands moderationCommands;
 
   @Inject
   public ServerManagerPlugin(ProxyServer proxy, Logger logger, @com.velocitypowered.api.plugin.annotation.DataDirectory Path dataDir) {
@@ -60,8 +60,9 @@ public final class ServerManagerPlugin {
       var cm = proxy.getCommandManager();
       var meta = cm.metaBuilder("servermanager").aliases("sm").plugin(this).build();
       this.rootCommand = new ServerManagerCmd(this, proxy, logger);
-      this.rootCommand.updateState(processManager, config, whitelistService, vanillaWhitelist, networkBanService, adminAuth);
+      this.rootCommand.updateState(processManager, config, whitelistService, vanillaWhitelist, moderation);
       cm.register(meta, rootCommand);
+      registerModerationCommands();
 
       logger.info("ServerManager initialized. Primary: {}", config.primaryServerName());
     } catch (Exception ex) {
@@ -84,8 +85,7 @@ public final class ServerManagerPlugin {
       if (processManager != null) {
         processManager.stopAllGracefully();
       }
-      adminAuth = null;
-      adminSessions = null;
+      moderation = null;
     } catch (Exception ex) {
       logger.error("Error during shutdown stopAll", ex);
     }
@@ -143,22 +143,15 @@ public final class ServerManagerPlugin {
     this.config = newConfig;
     this.whitelistService = new WhitelistService(newConfig.whitelist, logger, dataDir);
     this.vanillaWhitelist = new VanillaWhitelistChecker(newConfig, logger);
-    this.networkBanService = new NetworkBanService(newConfig.banlist, logger, dataDir);
-    if (newConfig.admin != null && newConfig.admin.enabled) {
-      this.adminAuth = new com.example.soj.admin.AdminAuthService(newConfig.admin, dataDir, logger);
-      this.adminSessions = new com.example.soj.admin.AdminSessionManager(newConfig.admin);
-    } else {
-      this.adminAuth = null;
-      this.adminSessions = null;
-    }
-    this.whitelistHttpServer = new WhitelistHttpServer(newConfig, newConfig.whitelist, newConfig.admin, logger, whitelistService,
-        processManager, networkBanService, vanillaWhitelist, rootCommand, dataDir, adminAuth, adminSessions, this);
+    this.moderation = new ModerationService(newConfig.moderation, logger, dataDir);
+    this.whitelistHttpServer = new WhitelistHttpServer(newConfig.whitelist, logger, whitelistService);
     this.whitelistHttpServer.start();
     this.playerEvents = new PlayerEvents(this, proxy, newConfig, processManager, logger,
-        whitelistService, vanillaWhitelist, networkBanService);
+        whitelistService, vanillaWhitelist, moderation);
     proxy.getEventManager().register(this, playerEvents);
+    registerModerationCommands();
     if (rootCommand != null) {
-      rootCommand.updateState(processManager, newConfig, whitelistService, vanillaWhitelist, networkBanService, adminAuth);
+      rootCommand.updateState(processManager, newConfig, whitelistService, vanillaWhitelist, moderation);
     }
   }
 
@@ -171,6 +164,24 @@ public final class ServerManagerPlugin {
   public void removeNetworkWhitelistEntry(UUID uuid, String name) {
     if (playerEvents != null) {
       playerEvents.removeFromMirrors(uuid, name);
+    }
+  }
+
+  private void registerModerationCommands() {
+    if (moderationCommands == null) {
+      moderationCommands = new ModerationCommands(proxy, config, moderation, logger);
+      var cm = proxy.getCommandManager();
+      cm.register(cm.metaBuilder("ban").plugin(this).build(), moderationCommands);
+      cm.register(cm.metaBuilder("ipban").plugin(this).build(), moderationCommands);
+      cm.register(cm.metaBuilder("unban").plugin(this).build(), moderationCommands);
+      cm.register(cm.metaBuilder("mute").plugin(this).build(), moderationCommands);
+      cm.register(cm.metaBuilder("unmute").plugin(this).build(), moderationCommands);
+      cm.register(cm.metaBuilder("warn").plugin(this).build(), moderationCommands);
+      cm.register(cm.metaBuilder("banlist").plugin(this).build(), moderationCommands);
+      cm.register(cm.metaBuilder("mutelist").plugin(this).build(), moderationCommands);
+      cm.register(cm.metaBuilder("warnlist").plugin(this).build(), moderationCommands);
+    } else {
+      moderationCommands.updateState(config, moderation);
     }
   }
 }
