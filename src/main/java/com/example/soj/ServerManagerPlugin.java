@@ -179,7 +179,6 @@ public final class ServerManagerPlugin {
       cm.register(cm.metaBuilder("warn").plugin(this).build(), moderationCommands);
       cm.register(cm.metaBuilder("banlist").plugin(this).build(), moderationCommands);
       cm.register(cm.metaBuilder("mutelist").plugin(this).build(), moderationCommands);
-      cm.register(cm.metaBuilder("warnlist").plugin(this).build(), moderationCommands);
     } else {
       moderationCommands.updateState(config, moderation, whitelistService);
     }

@@ -13,8 +13,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class ModerationService {
-  public enum Type { BAN, IPBAN, MUTE, WARN }
-  public record Entry(Type type, UUID uuid, String ip, String reason, String actor, long createdAt, long expiresAt) {}
+  public enum Type { BAN, IPBAN, MUTE }
+  public record Entry(Type type, UUID uuid, String ip, String name, String reason, String actor, long createdAt, long expiresAt) {}
 
   private final Config.Moderation cfg;
   private final Path dataFile;
@@ -23,7 +23,6 @@ public final class ModerationService {
   private final Map<UUID, Entry> bansByUuid = new ConcurrentHashMap<>();
   private final Map<String, Entry> bansByIp = new ConcurrentHashMap<>();
   private final Map<UUID, Entry> mutesByUuid = new ConcurrentHashMap<>();
-  private final Map<UUID, Entry> warnsByUuid = new ConcurrentHashMap<>();
 
   public ModerationService(Config.Moderation cfg, Logger log, Path dataDir) throws IOException {
     this.cfg = cfg;
@@ -36,8 +35,8 @@ public final class ModerationService {
 
   public boolean enabled() { return cfg != null && cfg.enabled; }
 
-  public synchronized void banUuid(UUID uuid, String reason, String actor, long expiresAt) throws IOException {
-    Entry e = new Entry(Type.BAN, uuid, null, reason, actor, now(), expiresAt);
+  public synchronized void banUuid(UUID uuid, String name, String reason, String actor, long expiresAt) throws IOException {
+    Entry e = new Entry(Type.BAN, uuid, null, name, reason, actor, now(), expiresAt);
     bansByUuid.put(uuid, e);
     persist();
   }
@@ -45,7 +44,7 @@ public final class ModerationService {
   public synchronized void banIp(String ip, String reason, String actor, long expiresAt) throws IOException {
     String normalized = normalizeIp(ip);
     if (normalized == null) return;
-    Entry e = new Entry(Type.IPBAN, null, normalized, reason, actor, now(), expiresAt);
+    Entry e = new Entry(Type.IPBAN, null, normalized, null, reason, actor, now(), expiresAt);
     bansByIp.put(normalized, e);
     persist();
   }
@@ -56,9 +55,9 @@ public final class ModerationService {
     persist();
   }
 
-  public synchronized void mute(UUID uuid, String reason, String actor, long expiresAt) throws IOException {
+  public synchronized void mute(UUID uuid, String name, String reason, String actor, long expiresAt) throws IOException {
     if (uuid == null) return;
-    Entry e = new Entry(Type.MUTE, uuid, null, reason, actor, now(), expiresAt);
+    Entry e = new Entry(Type.MUTE, uuid, null, name, reason, actor, now(), expiresAt);
     mutesByUuid.put(uuid, e);
     persist();
   }
@@ -66,13 +65,6 @@ public final class ModerationService {
   public synchronized void unmute(UUID uuid) throws IOException {
     if (uuid == null) return;
     mutesByUuid.remove(uuid);
-    persist();
-  }
-
-  public synchronized void warn(UUID uuid, String reason, String actor) throws IOException {
-    if (uuid == null) return;
-    Entry e = new Entry(Type.WARN, uuid, null, reason, actor, now(), 0);
-    warnsByUuid.put(uuid, e);
     persist();
   }
 
@@ -109,12 +101,6 @@ public final class ModerationService {
     return list;
   }
 
-  public List<Entry> warns() {
-    List<Entry> list = new ArrayList<>(warnsByUuid.values());
-    list.sort(Comparator.comparing(Entry::createdAt).reversed());
-    return list;
-  }
-
   private void purgeExpired() {
     long now = now();
     bansByUuid.values().removeIf(e -> expired(e, now));
@@ -130,7 +116,6 @@ public final class ModerationService {
     bansByUuid.clear();
     bansByIp.clear();
     mutesByUuid.clear();
-    warnsByUuid.clear();
     if (!Files.exists(dataFile)) return;
     Object parsed = yaml.load(Files.readString(dataFile, StandardCharsets.UTF_8));
     if (!(parsed instanceof Iterable<?> iterable)) return;
@@ -141,27 +126,26 @@ public final class ModerationService {
       try { type = Type.valueOf(typeRaw); } catch (Exception ex) { continue; }
       UUID uuid = parseUuid(map.get("uuid"));
       String ip = normalizeIp(Objects.toString(map.get("ip"), null));
+      String name = Objects.toString(map.get("name"), null);
       String reason = Objects.toString(map.get("reason"), null);
       String actor = Objects.toString(map.get("actor"), null);
       long created = parseLong(map.get("createdAt"), now());
       long expires = parseLong(map.get("expiresAt"), 0);
-      Entry e = new Entry(type, uuid, ip, reason, actor, created, expires);
+      Entry e = new Entry(type, uuid, ip, name, reason, actor, created, expires);
       switch (type) {
         case BAN -> { if (uuid != null) bansByUuid.put(uuid, e); }
         case IPBAN -> { if (ip != null) bansByIp.put(ip, e); }
         case MUTE -> { if (uuid != null) mutesByUuid.put(uuid, e); }
-        case WARN -> { if (uuid != null) warnsByUuid.put(uuid, e); }
       }
     }
-    log.info("Loaded moderation entries: {} bans, {} ipbans, {} mutes, {} warns",
-        bansByUuid.size(), bansByIp.size(), mutesByUuid.size(), warnsByUuid.size());
+    log.info("Loaded moderation entries: {} bans, {} ipbans, {} mutes",
+        bansByUuid.size(), bansByIp.size(), mutesByUuid.size());
   }
 
   private void persist() throws IOException {
     List<Map<String, Object>> rows = new ArrayList<>();
     for (Entry e : bans()) rows.add(toMap(e));
     for (Entry e : mutes()) rows.add(toMap(e));
-    for (Entry e : warns()) rows.add(toMap(e));
     String yamlStr = yaml.dump(rows);
     if (dataFile.getParent() != null) Files.createDirectories(dataFile.getParent());
     Files.writeString(dataFile, yamlStr, StandardCharsets.UTF_8);
@@ -172,6 +156,7 @@ public final class ModerationService {
     map.put("type", e.type().name());
     if (e.uuid() != null) map.put("uuid", e.uuid().toString());
     if (e.ip() != null) map.put("ip", e.ip());
+    if (e.name() != null) map.put("name", e.name());
     map.put("reason", e.reason());
     map.put("actor", e.actor());
     map.put("createdAt", e.createdAt());

@@ -11,7 +11,7 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
 - Admin hold command (`/sm hold`) keeps a backend online for a set window even when it is empty.
 - Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
 - Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve web onboarding.
-- Built-in moderation: `/ban`, `/ipban`, `/unban`, `/mute`, `/unmute`, `/warn`, plus `/banlist`, `/mutelist`, `/warnlist`. Banned players are blocked at login so they cannot start backends.
+- Built-in moderation: `/ban`, `/ipban`, `/unban`, `/mute`, `/unmute`, `/warn`, plus `/banlist` and `/mutelist`. Banned players are blocked at login so they cannot start backends.
 - In-game `/sm whitelist` tooling to view/add/remove entries from both the network whitelist and any managed vanilla `whitelist.json`.
 - Optional daily auto-restart time for servers held indefinitely, with 1-minute and 5-second warnings broadcast in-game.
 
@@ -232,8 +232,8 @@ Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for 
 - `/ipban <player|ip> [duration] [reason]` — bans by IP; if a player is online their current IP is used. Kicks immediately when online.
 - `/unban <player|ip>` — removes UUID/IP bans.
 - `/mute <player> [duration] [reason]` and `/unmute <player>` — mutes block chat and surface a clear muted message with expiry.
-- `/warn <player> [reason]` — records a warn and notifies the player.
-- `/banlist`, `/mutelist`, `/warnlist` — show the most recent 20 entries with expiry info.
+- `/warn <player> [reason]` — notifies the player (not persisted).
+- `/banlist`, `/mutelist` — show the most recent 20 entries with expiry info.
 Permissions: `servermanager.moderation.ban`, `.ipban`, `.unban`, `.mute`, `.unmute`, `.warn`, `.view` (lists). Console bypasses checks. Bans are enforced at login, before any backend starts.
 
 ## Logging

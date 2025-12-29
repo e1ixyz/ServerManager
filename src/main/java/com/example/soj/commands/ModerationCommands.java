@@ -68,7 +68,6 @@ public final class ModerationCommands implements SimpleCommand {
       case "warn" -> handleWarn(src, args);
       case "banlist" -> handleList(src, moderation.bans(), "Bans");
       case "mutelist" -> handleList(src, moderation.mutes(), "Mutes");
-      case "warnlist" -> handleList(src, moderation.warns(), "Warns");
       default -> src.sendMessage(Component.text("Unknown moderation command."));
     }
   }
@@ -81,7 +80,7 @@ public final class ModerationCommands implements SimpleCommand {
 
     return switch (alias) {
       case "ban", "ipban", "mute", "unmute", "warn", "unban" -> suggestPlayers(args);
-      case "banlist", "mutelist", "warnlist" -> List.of();
+      case "banlist", "mutelist" -> List.of();
       default -> List.of();
     };
   }
@@ -107,7 +106,7 @@ public final class ModerationCommands implements SimpleCommand {
     }
     long expiresAt = parsed.durationSeconds <= 0 ? 0 : System.currentTimeMillis() + parsed.durationSeconds * 1000L;
     try {
-      moderation.banUuid(target.uuid, parsed.reason, nameOf(src), expiresAt);
+      moderation.banUuid(target.uuid, target.name(), parsed.reason, nameOf(src), expiresAt);
     } catch (IOException ex) {
       log.error("Failed to ban player", ex);
       src.sendMessage(Component.text("Failed to update ban list: " + ex.getMessage()));
@@ -202,7 +201,7 @@ public final class ModerationCommands implements SimpleCommand {
     }
     long expiresAt = parsed.durationSeconds <= 0 ? 0 : System.currentTimeMillis() + parsed.durationSeconds * 1000L;
     try {
-      moderation.mute(target.uuid, parsed.reason, nameOf(src), expiresAt);
+      moderation.mute(target.uuid, target.name(), parsed.reason, nameOf(src), expiresAt);
     } catch (IOException ex) {
       log.error("Failed to mute", ex);
       src.sendMessage(Component.text("Failed to update mute list: " + ex.getMessage()));
@@ -252,13 +251,6 @@ public final class ModerationCommands implements SimpleCommand {
       return;
     }
     String reason = args.length >= 2 ? joinArgs(args, 1) : "Warned by " + nameOf(src);
-    try {
-      moderation.warn(target.uuid, reason, nameOf(src));
-    } catch (IOException ex) {
-      log.error("Failed to warn", ex);
-      src.sendMessage(Component.text("Failed to update warn list: " + ex.getMessage()));
-      return;
-    }
     proxy.getPlayer(target.uuid).ifPresent(p -> p.sendMessage(
         moderationMessage(cfg.messages.warnMessage, p.getUsername(), reason, 0)));
     src.sendMessage(Component.text("Warned " + target.display() + reasonSuffix(reason)));
@@ -273,7 +265,7 @@ public final class ModerationCommands implements SimpleCommand {
     int limit = Math.min(entries.size(), 20);
     for (int i = 0; i < limit; i++) {
       ModerationService.Entry e = entries.get(i);
-      String who = e.uuid() != null ? e.uuid().toString() : e.ip();
+      String who = displayName(e);
       String reason = e.reason() == null ? "" : " [" + e.reason() + "]";
       String expiry = e.expiresAt() > 0 ? " (expires " + formatDuration(secondsUntil(e.expiresAt())) + ")" : "";
       src.sendMessage(Component.text(" - " + e.type().name().toLowerCase(Locale.ROOT) + ": " + who + reason + expiry));
@@ -485,6 +477,21 @@ public final class ModerationCommands implements SimpleCommand {
       }
     } catch (Exception ignored) {}
     return null;
+  }
+
+  private String displayName(ModerationService.Entry e) {
+    if (e.name() != null && !e.name().isBlank()) return e.name();
+    if (e.uuid() != null) {
+      var online = proxy.getPlayer(e.uuid());
+      if (online.isPresent()) return online.get().getUsername();
+      if (whitelist != null) {
+        var wl = whitelist.lookup(e.uuid(), null);
+        if (wl.isPresent() && wl.get().lastKnownName() != null) return wl.get().lastKnownName();
+      }
+      return e.uuid().toString();
+    }
+    if (e.ip() != null) return e.ip();
+    return "unknown";
   }
 
   private String suffix(long expiresAt) {
