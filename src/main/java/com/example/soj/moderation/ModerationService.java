@@ -49,10 +49,12 @@ public final class ModerationService {
     persist();
   }
 
-  public synchronized void unban(UUID uuid, String ip) throws IOException {
-    if (uuid != null) bansByUuid.remove(uuid);
-    if (ip != null) bansByIp.remove(normalizeIp(ip));
-    persist();
+  public synchronized boolean unban(UUID uuid, String ip) throws IOException {
+    boolean changed = false;
+    if (uuid != null) changed |= (bansByUuid.remove(uuid) != null);
+    if (ip != null) changed |= (bansByIp.remove(normalizeIp(ip)) != null);
+    if (changed) persist();
+    return changed;
   }
 
   public synchronized void mute(UUID uuid, String name, String reason, String actor, long expiresAt) throws IOException {
@@ -62,10 +64,11 @@ public final class ModerationService {
     persist();
   }
 
-  public synchronized void unmute(UUID uuid) throws IOException {
-    if (uuid == null) return;
-    mutesByUuid.remove(uuid);
-    persist();
+  public synchronized boolean unmute(UUID uuid) throws IOException {
+    if (uuid == null) return false;
+    boolean changed = mutesByUuid.remove(uuid) != null;
+    if (changed) persist();
+    return changed;
   }
 
   public Entry findBan(UUID uuid, String ip) {
@@ -83,6 +86,26 @@ public final class ModerationService {
   public Entry findMute(UUID uuid) {
     purgeExpired();
     return uuid == null ? null : mutesByUuid.get(uuid);
+  }
+
+  public Entry findBanByName(String name) {
+    if (name == null || name.isBlank()) return null;
+    purgeExpired();
+    String lower = name.toLowerCase(Locale.ROOT);
+    for (Entry e : bans()) {
+      if (e.name() != null && e.name().toLowerCase(Locale.ROOT).equals(lower)) return e;
+    }
+    return null;
+  }
+
+  public Entry findMuteByName(String name) {
+    if (name == null || name.isBlank()) return null;
+    purgeExpired();
+    String lower = name.toLowerCase(Locale.ROOT);
+    for (Entry e : mutes()) {
+      if (e.name() != null && e.name().toLowerCase(Locale.ROOT).equals(lower)) return e;
+    }
+    return null;
   }
 
   public List<Entry> bans() {

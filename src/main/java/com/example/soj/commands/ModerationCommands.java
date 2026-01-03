@@ -14,6 +14,9 @@ import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -28,6 +31,7 @@ public final class ModerationCommands implements SimpleCommand {
   private static final MiniMessage MINI = MiniMessage.miniMessage();
   private static final Pattern DURATION_TOKEN = Pattern.compile("(?i)(\\d+)([dhms]?)");
   private static final List<String> FOREVER = List.of("forever", "permanent", "perm", "infinite", "indefinite");
+  private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
   private final ProxyServer proxy;
   private volatile Config cfg;
   private volatile ModerationService moderation;
@@ -66,8 +70,8 @@ public final class ModerationCommands implements SimpleCommand {
       case "mute" -> handleMute(src, args);
       case "unmute" -> handleUnmute(src, args);
       case "warn" -> handleWarn(src, args);
-      case "banlist" -> handleList(src, moderation.bans(), "Bans");
-      case "mutelist" -> handleList(src, moderation.mutes(), "Mutes");
+      case "banlist" -> handleList(src, moderation.bans(), "banlist", args);
+      case "mutelist" -> handleList(src, moderation.mutes(), "mutelist", args);
       default -> src.sendMessage(Component.text("Unknown moderation command."));
     }
   }
@@ -164,20 +168,33 @@ public final class ModerationCommands implements SimpleCommand {
     }
     Target target = resolveTarget(args[0]);
     String ip = target.ip;
-    if (ip == null && looksLikeIp(args[0])) ip = args[0];
     UUID uuid = target.uuid != null ? target.uuid : parseUuid(args[0]);
+
+    // Fallback: match by name in stored bans
+    ModerationService.Entry banByName = (uuid == null) ? moderation.findBanByName(args[0]) : null;
+    if (banByName != null) {
+      uuid = banByName.uuid();
+      ip = banByName.ip();
+      target = new Target(uuid, banByName.name(), ip);
+    }
+
     if (uuid == null && ip == null) {
-      src.sendMessage(Component.text("Provide a player UUID/name or an IP to unban."));
+      src.sendMessage(Component.text("No matching ban found for that player/IP."));
       return;
     }
+    boolean changed;
     try {
-      moderation.unban(uuid, ip);
+      changed = moderation.unban(uuid, ip);
     } catch (IOException ex) {
       log.error("Failed to unban", ex);
       src.sendMessage(Component.text("Failed to update ban list: " + ex.getMessage()));
       return;
     }
-    src.sendMessage(Component.text("Unbanned " + (ip != null ? ip : target.display())));
+    if (!changed) {
+      src.sendMessage(Component.text("No matching ban found for that player/IP."));
+      return;
+    }
+    src.sendMessage(Component.text("Unbanned " + (target.name() != null ? target.name() : (ip != null ? ip : "unknown"))));
   }
 
   private void handleMute(CommandSource src, String[] args) {
@@ -222,15 +239,24 @@ public final class ModerationCommands implements SimpleCommand {
       return;
     }
     Target target = resolveTarget(args[0]);
+    ModerationService.Entry muteByName = moderation.findMuteByName(args[0]);
+    if (muteByName != null && target.uuid == null) {
+      target = new Target(muteByName.uuid(), muteByName.name(), muteByName.ip());
+    }
     if (target.uuid == null) {
-      src.sendMessage(Component.text("Player must be online or a valid UUID."));
+      src.sendMessage(Component.text("No active mute found for that player."));
       return;
     }
+    boolean changed;
     try {
-      moderation.unmute(target.uuid);
+      changed = moderation.unmute(target.uuid);
     } catch (IOException ex) {
       log.error("Failed to unmute", ex);
       src.sendMessage(Component.text("Failed to update mute list: " + ex.getMessage()));
+      return;
+    }
+    if (!changed) {
+      src.sendMessage(Component.text("No active mute found for that player."));
       return;
     }
     src.sendMessage(Component.text("Unmuted " + target.display()));
@@ -256,22 +282,45 @@ public final class ModerationCommands implements SimpleCommand {
     src.sendMessage(Component.text("Warned " + target.display() + reasonSuffix(reason)));
   }
 
-  private void handleList(CommandSource src, List<ModerationService.Entry> entries, String title) {
+  private void handleList(CommandSource src, List<ModerationService.Entry> entries, String alias, String[] args) {
     if (!has(src, "servermanager.moderation.view", "servermanager.moderation.ban")) {
       src.sendMessage(Component.text("You don't have permission."));
       return;
     }
-    src.sendMessage(Component.text(title + " (" + entries.size() + "):"));
-    int limit = Math.min(entries.size(), 20);
-    for (int i = 0; i < limit; i++) {
+    if (entries.isEmpty()) {
+      src.sendMessage(Component.text(alias + ": none."));
+      return;
+    }
+
+    // detail view: /banlist detail <index>
+    if (args.length >= 2 && "detail".equalsIgnoreCase(args[0])) {
+      int idx = parseIntSafe(args[1]) - 1;
+      if (idx < 0 || idx >= entries.size()) {
+        src.sendMessage(Component.text("No entry at that position."));
+        return;
+      }
+      sendDetail(src, entries.get(idx), alias, idx + 1);
+      return;
+    }
+
+    int perPage = 10;
+    int page = parsePageArg(args);
+    int totalPages = Math.max(1, (int) Math.ceil(entries.size() / (double) perPage));
+    page = Math.max(1, Math.min(totalPages, page));
+    int start = (page - 1) * perPage;
+    int end = Math.min(entries.size(), start + perPage);
+    src.sendMessage(Component.text(alias + " (page " + page + "/" + totalPages + ", " + entries.size() + " total):"));
+    for (int i = start; i < end; i++) {
       ModerationService.Entry e = entries.get(i);
       String who = displayName(e);
-      String reason = e.reason() == null ? "" : " [" + e.reason() + "]";
-      String expiry = e.expiresAt() > 0 ? " (expires " + formatDuration(secondsUntil(e.expiresAt())) + ")" : "";
-      src.sendMessage(Component.text(" - " + e.type().name().toLowerCase(Locale.ROOT) + ": " + who + reason + expiry));
+      String expiry = e.expiresAt() > 0 ? "expires in " + formatDuration(secondsUntil(e.expiresAt())) : "permanent";
+      Component details = Component.text("[details]")
+          .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/" + alias + " detail " + (i + 1)))
+          .hoverEvent(Component.text("Click to show details for " + who));
+      src.sendMessage(Component.text((i + 1) + ") " + who + " (" + expiry + ") ").append(details));
     }
-    if (entries.size() > limit) {
-      src.sendMessage(Component.text(" …and " + (entries.size() - limit) + " more."));
+    if (entries.size() > end) {
+      src.sendMessage(Component.text("Use /" + alias + " " + (page + 1) + " for more."));
     }
   }
 
@@ -492,6 +541,37 @@ public final class ModerationCommands implements SimpleCommand {
     }
     if (e.ip() != null) return e.ip();
     return "unknown";
+  }
+
+  private void sendDetail(CommandSource src, ModerationService.Entry e, String alias, int index) {
+    String who = displayName(e);
+    String type = e.type().name().toLowerCase(Locale.ROOT);
+    String reason = e.reason() == null ? "none" : e.reason();
+    String actor = e.actor() == null ? "unknown" : e.actor();
+    String created = TS.format(Instant.ofEpochMilli(e.createdAt()));
+    String expires = e.expiresAt() > 0 ? TS.format(Instant.ofEpochMilli(e.expiresAt())) + " (in " + formatDuration(secondsUntil(e.expiresAt())) + ")" : "never";
+    src.sendMessage(Component.text(index + ") " + type + " :: " + who));
+    src.sendMessage(Component.text("   reason: " + reason));
+    if (e.uuid() != null) src.sendMessage(Component.text("   uuid: " + e.uuid()));
+    if (e.ip() != null) src.sendMessage(Component.text("   ip: " + e.ip()));
+    src.sendMessage(Component.text("   actor: " + actor));
+    src.sendMessage(Component.text("   created: " + created));
+    src.sendMessage(Component.text("   expires: " + expires));
+  }
+
+  private int parsePageArg(String[] args) {
+    if (args.length == 0) return 1;
+    if ("detail".equalsIgnoreCase(args[0])) return 1;
+    int p = parseIntSafe(args[0]);
+    return p <= 0 ? 1 : p;
+  }
+
+  private int parseIntSafe(String raw) {
+    try {
+      return Integer.parseInt(raw);
+    } catch (Exception ex) {
+      return -1;
+    }
   }
 
   private String suffix(long expiresAt) {
