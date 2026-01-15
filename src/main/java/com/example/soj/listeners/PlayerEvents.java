@@ -79,6 +79,9 @@ public final class PlayerEvents {
   private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
   /** Auto-restart schedules for indefinite holds. */
   private final Map<String, RestartSchedule> holdRestartTasks = new ConcurrentHashMap<>();
+  /** Throttle auto-start attempts for held servers that went offline. */
+  private final Map<String, Long> holdAutoStartAttemptMs = new ConcurrentHashMap<>();
+  private static final long HOLD_AUTOSTART_COOLDOWN_MS = 30_000L;
   @SuppressWarnings("FieldCanBeLocal")
   private final ScheduledTask heartbeatTask;
 
@@ -166,6 +169,19 @@ public final class PlayerEvents {
         refreshHoldRestart(name);
         if (!mgr.isRunning(name)) {
           isReadyCache.put(name, Boolean.FALSE);
+          if (mgr.isHoldActive(name)) {
+            long now = System.currentTimeMillis();
+            long lastAttempt = holdAutoStartAttemptMs.getOrDefault(name, 0L);
+            if (now - lastAttempt >= HOLD_AUTOSTART_COOLDOWN_MS) {
+              holdAutoStartAttemptMs.put(name, now);
+              try {
+                log.info("[{}] hold active but server offline; starting...", name);
+                mgr.start(name);
+              } catch (IOException ex) {
+                log.error("Failed to auto-start held server {}", name, ex);
+              }
+            }
+          }
           continue;
         }
         // Assume not ready until a ping succeeds
@@ -529,11 +545,8 @@ public final class PlayerEvents {
       return;
     }
 
-    long now = System.currentTimeMillis();
     RestartSchedule existing = holdRestartTasks.get(serverName);
-    if (existing != null && existing.restartAtMs > now) {
-      return; // already scheduled
-    }
+    if (existing != null) return; // already scheduled
     scheduleHoldRestart(serverName, delayMs, time);
   }
 

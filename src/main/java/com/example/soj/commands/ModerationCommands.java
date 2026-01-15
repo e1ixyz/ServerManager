@@ -169,6 +169,9 @@ public final class ModerationCommands implements SimpleCommand {
     Target target = resolveTarget(args[0]);
     String ip = target.ip;
     UUID uuid = target.uuid != null ? target.uuid : parseUuid(args[0]);
+    if (ip == null && looksLikeIp(args[0])) {
+      ip = args[0];
+    }
 
     // Fallback: match by name in stored bans
     ModerationService.Entry banByName = (uuid == null) ? moderation.findBanByName(args[0]) : null;
