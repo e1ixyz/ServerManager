@@ -82,6 +82,7 @@ messages:
   started:        "<green>Started <white><server></white>.</green>"
   alreadyRunning: "<yellow><white><server></white> is already running.</yellow>"
   stopped:        "<yellow>Stopped <white><server></white>.</yellow>"
+  stopKick:       "<red><white><server></white> is stopping. Please rejoin later.</red>"
   alreadyStopped: "<gray><white><server></white> is not running.</gray>"
   statusHeader:   "<gray>Managed servers:</gray>"
   statusLine:     "<white><server></white>: <state>"

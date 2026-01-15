@@ -56,6 +56,7 @@ public final class Config {
     public String started        = "<green>Started <white><server></white>.</green>";
     public String alreadyRunning = "<yellow><white><server></white> is already running.</yellow>";
     public String stopped        = "<yellow>Stopped <white><server></white>.</yellow>";
+    public String stopKick       = "<red><white><server></white> is stopping. Please rejoin later.</red>";
     public String alreadyStopped = "<gray><white><server></white> is not running.</gray>";
     public String statusHeader   = "<gray>Managed servers:</gray>";
     public String statusLine     = "<white><server></white>: <state>";
@@ -135,6 +136,7 @@ public final class Config {
           started:        "<green>Started <white><server></white>.</green>"
           alreadyRunning: "<yellow><white><server></white> is already running.</yellow>"
           stopped:        "<yellow>Stopped <white><server></white>.</yellow>"
+          stopKick:       "<red><white><server></white> is stopping. Please rejoin later.</red>"
           alreadyStopped: "<gray><white><server></white> is not running.</gray>"
           statusHeader:   "<gray>Managed servers:</gray>"
           statusLine:     "<white><server></white>: <state>"

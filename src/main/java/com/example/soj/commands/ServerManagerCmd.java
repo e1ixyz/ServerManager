@@ -387,6 +387,10 @@ public final class ServerManagerCmd implements SimpleCommand {
         if (server == null) { src.sendMessage(mm0(config.messages.usage)); return; }
         if (!manager.isKnown(server)) { src.sendMessage(mm2(config.messages.unknownServer, server, nameOf(src))); return; }
         if (!manager.isRunning(server)) { src.sendMessage(mm2(config.messages.alreadyStopped, server, nameOf(src))); return; }
+        String stopKick = firstNonBlank(config.messages.stopKick,
+            "<red><white><server></white> is stopping. Please rejoin later.</red>");
+        Component kickMsg = mm2(stopKick, server, nameOf(src));
+        disconnectPlayersOn(server, kickMsg);
         manager.stop(server);
         src.sendMessage(mm2(config.messages.stopped, server, nameOf(src)));
       }
@@ -816,6 +820,15 @@ public final class ServerManagerCmd implements SimpleCommand {
         Placeholder.unparsed("server", server == null ? "" : server),
         Placeholder.unparsed("player", player == null ? "" : player),
         Placeholder.unparsed("duration", duration == null ? "" : duration));
+  }
+
+  private void disconnectPlayersOn(String server, Component message) {
+    if (server == null || message == null) return;
+    proxy.getAllPlayers().forEach(p -> p.getCurrentServer().ifPresent(cs -> {
+      if (cs.getServerInfo().getName().equals(server)) {
+        p.disconnect(message);
+      }
+    }));
   }
 
   private static long parseDurationSeconds(String raw) {
