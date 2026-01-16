@@ -134,6 +134,17 @@ whitelist:
 moderation:
   enabled: true
   dataFile: "moderation.yml"
+autoIpBan:
+  enabled: false
+  dryRun: false
+  banMinutes: 60
+  reasonPrefix: "Auto-ban"
+  trustedIps: []
+  trustedCidrs: []
+  thresholds:
+    connections: { limit: 10, windowSeconds: 10 }
+    pings:       { limit: 15, windowSeconds: 10 }
+    badUsernames:{ limit: 5,  windowSeconds: 60 }
 
 forcedHosts: {}
 ```
@@ -149,6 +160,7 @@ Key points:
 - Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a short URL and one-time code and can redeem it through the built-in HTTP form.
 - `allowVanillaBypass: true` remains the default for the primary backend when the per-server flag is not set. Set it to `false` if you want even the primary server to ignore its vanilla whitelist entirely.
 - `moderation:` controls the proxy-level moderation registry used by the standalone `/ban`, `/ipban`, `/mute`, `/warn`, and list commands. When enabled (default) bans are enforced at login, before any backend starts.
+- `autoIpBan:` enables lightweight rate-based IP bans for ping/login spam; set `dryRun: true` to log-only first and add trusted IPs for your proxy/CDN.
 
 ## Network Whitelist Flow
 1. Player joins Velocity.

@@ -2,6 +2,7 @@ package com.example.soj.listeners;
 
 import com.example.soj.Config;
 import com.example.soj.ServerProcessManager;
+import com.example.soj.moderation.AutoIpBanService;
 import com.example.soj.moderation.ModerationService;
 import com.example.soj.whitelist.VanillaWhitelistChecker;
 import com.example.soj.whitelist.WhitelistService;
@@ -22,6 +23,7 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.slf4j.Logger;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -54,6 +56,7 @@ public final class PlayerEvents {
   private final WhitelistService whitelist;
   private final VanillaWhitelistChecker vanillaWhitelist;
   private final ModerationService moderation;
+  private final AutoIpBanService autoIpBan;
   private final Config.Whitelist whitelistCfg;
   private final Map<String, Config.ForcedHost> forcedHostOverrides;
   private final Set<String> vanillaBypassServers;
@@ -79,6 +82,7 @@ public final class PlayerEvents {
   private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
   /** Auto-restart schedules for indefinite holds. */
   private final Map<String, RestartSchedule> holdRestartTasks = new ConcurrentHashMap<>();
+  private final Set<String> holdRestartInProgress = ConcurrentHashMap.newKeySet();
   /** Throttle auto-start attempts for held servers that went offline. */
   private final Map<String, Long> holdAutoStartAttemptMs = new ConcurrentHashMap<>();
   private static final long HOLD_AUTOSTART_COOLDOWN_MS = 30_000L;
@@ -114,6 +118,7 @@ public final class PlayerEvents {
     this.whitelist = whitelist;
     this.vanillaWhitelist = vanillaWhitelist;
     this.moderation = moderation;
+    this.autoIpBan = new AutoIpBanService(cfg.autoIpBan, moderation, log);
     this.whitelistCfg = (whitelist != null) ? whitelist.config() : null;
     this.forcedHostOverrides = new HashMap<>();
     if (cfg.forcedHosts != null) {
@@ -199,6 +204,10 @@ public final class PlayerEvents {
   // -------------------- MOTD --------------------
   @Subscribe
   public void onPing(ProxyPingEvent e) {
+    if (autoIpBan != null && autoIpBan.enabled()) {
+      String ip = remoteIp(e.getConnection().getRemoteAddress());
+      autoIpBan.record(ip, AutoIpBanService.EventType.PING, null);
+    }
     String rawHost = e.getConnection().getVirtualHost()
         .map(addr -> addr.getHostString())
         .orElse(null);
@@ -259,6 +268,24 @@ public final class PlayerEvents {
         e.setResult(LoginEvent.ComponentResult.denied(msg));
         log.info("Denied {} (banned) at login.", joining.getUsername());
         return;
+      }
+    }
+
+    if (autoIpBan != null && autoIpBan.enabled()) {
+      String ip = remoteIp(joining);
+      var decision = autoIpBan.record(ip, AutoIpBanService.EventType.CONNECTION, joining.getUsername());
+      if (decision.banned() && decision.entry() != null) {
+        Component msg = buildModerationMessage(cfg.messages.bannedMessage, joining.getUsername(), decision.entry());
+        e.setResult(LoginEvent.ComponentResult.denied(msg));
+        return;
+      }
+      if (autoIpBan.isBadUsername(joining.getUsername())) {
+        var badDecision = autoIpBan.record(ip, AutoIpBanService.EventType.BAD_USERNAME, joining.getUsername());
+        if (badDecision.banned() && badDecision.entry() != null) {
+          Component msg = buildModerationMessage(cfg.messages.bannedMessage, joining.getUsername(), badDecision.entry());
+          e.setResult(LoginEvent.ComponentResult.denied(msg));
+          return;
+        }
       }
     }
 
@@ -573,6 +600,9 @@ public final class PlayerEvents {
     }
 
     rs.restart = proxy.getScheduler().buildTask(pluginOwner, () -> {
+      if (!holdRestartInProgress.add(serverName)) {
+        return;
+      }
       notifyPlayers(serverName, mm(cfg.messages.holdRestartNow, serverName, ""));
       try {
         log.info("[{}] auto-restart triggered (indefinite hold). Stopping...", serverName);
@@ -588,6 +618,7 @@ public final class PlayerEvents {
         log.error("Failed to start {} during auto-restart", serverName, ex);
       } finally {
         holdRestartTasks.remove(serverName);
+        holdRestartInProgress.remove(serverName);
         long nextDelay = millisUntil(time);
         if (nextDelay > 0) {
           scheduleHoldRestart(serverName, nextDelay, time);
@@ -977,13 +1008,15 @@ public final class PlayerEvents {
   private String remoteIp(Player player) {
     try {
       var addr = player.getRemoteAddress();
-      if (addr instanceof java.net.InetSocketAddress) {
-        java.net.InetSocketAddress inet = (java.net.InetSocketAddress) addr;
-        if (inet.getAddress() != null) {
-          return inet.getAddress().getHostAddress();
-        }
-      }
+      return remoteIp(addr);
     } catch (Exception ignored) {}
+    return null;
+  }
+
+  private String remoteIp(java.net.SocketAddress addr) {
+    if (addr instanceof InetSocketAddress inet && inet.getAddress() != null) {
+      return inet.getAddress().getHostAddress();
+    }
     return null;
   }
 
@@ -1007,6 +1040,7 @@ public final class PlayerEvents {
       if (rs.restart != null) rs.restart.cancel();
     });
     holdRestartTasks.clear();
+    holdRestartInProgress.clear();
     heartbeatTask.cancel();
   }
 }

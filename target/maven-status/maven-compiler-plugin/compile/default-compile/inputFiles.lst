@@ -6,6 +6,7 @@
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/com/example/soj/whitelist/VanillaWhitelistChecker.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/com/example/soj/whitelist/WhitelistHttpServer.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/com/example/soj/ManagedServer.java
+/Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/com/example/soj/moderation/AutoIpBanService.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/com/example/soj/ServerManagerPlugin.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/com/example/soj/ServerConfig.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/com/example/soj/commands/StatusCmd.java

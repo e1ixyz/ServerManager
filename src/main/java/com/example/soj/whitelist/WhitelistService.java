@@ -121,7 +121,7 @@ public final class WhitelistService {
     return changed;
   }
 
-  public PendingCode issueCode(UUID uuid, String username) {
+  public synchronized PendingCode issueCode(UUID uuid, String username) {
     purgeExpiredCodes();
     PendingCode existing = codesByPlayer.get(uuid);
     if (existing != null && !existing.expired()) {
@@ -202,7 +202,13 @@ public final class WhitelistService {
   private void loadExisting() throws IOException {
     if (!Files.exists(dataFile)) return;
     String raw = Files.readString(dataFile, StandardCharsets.UTF_8);
-    Object parsed = yaml.load(raw);
+    Object parsed;
+    try {
+      parsed = yaml.load(raw);
+    } catch (RuntimeException ex) {
+      log.warn("Failed to parse whitelist data {}", dataFile.toString().replace('\\','/'), ex);
+      return;
+    }
     if (!(parsed instanceof Iterable<?> iterable)) return;
     int count = 0;
     for (Object obj : iterable) {

@@ -176,7 +176,13 @@ public final class VanillaWhitelistChecker {
         return existing;
       }
       String raw = Files.readString(file, StandardCharsets.UTF_8);
-      Object parsed = yaml.load(raw);
+      Object parsed;
+      try {
+        parsed = yaml.load(raw);
+      } catch (RuntimeException ex) {
+        log.warn("Failed to parse vanilla whitelist {}", file.toString().replace('\\','/'), ex);
+        return existing;
+      }
       Set<UUID> uuids = new HashSet<>();
       Set<String> namesWithoutUuid = new HashSet<>();
       for (VanillaEntry entry : readEntries(parsed)) {
@@ -185,6 +191,9 @@ public final class VanillaWhitelistChecker {
       }
       return new Cache(lastModified, uuids, namesWithoutUuid);
     } catch (IOException ex) {
+      log.warn("Failed to read vanilla whitelist {}", file.toString().replace('\\','/'), ex);
+      return existing;
+    } catch (RuntimeException ex) {
       log.warn("Failed to read vanilla whitelist {}", file.toString().replace('\\','/'), ex);
       return existing;
     }
@@ -242,7 +251,13 @@ public final class VanillaWhitelistChecker {
       return entries;
     }
     String raw = Files.readString(file, StandardCharsets.UTF_8);
-    Object parsed = yaml.load(raw);
+    Object parsed;
+    try {
+      parsed = yaml.load(raw);
+    } catch (RuntimeException ex) {
+      log.warn("Failed to parse vanilla whitelist {}", file.toString().replace('\\','/'), ex);
+      return entries;
+    }
     entries.addAll(readEntries(parsed));
     return entries;
   }

@@ -21,6 +21,7 @@ public final class Config {
   public Messages messages = new Messages();
   public Whitelist whitelist = new Whitelist();
   public Moderation moderation = new Moderation();
+  public AutoIpBan autoIpBan = new AutoIpBan();
 
   public static final class Motd {
     public String offline  = "<gray>Your Network</gray> <gray>- <white><server></white></gray>";
@@ -96,6 +97,27 @@ public final class Config {
   public static final class Moderation {
     public boolean enabled = true;
     public String dataFile = "moderation.yml";
+  }
+
+  public static final class AutoIpBan {
+    public boolean enabled = false;
+    public boolean dryRun = false;
+    public int banMinutes = 60;
+    public String reasonPrefix = "Auto-ban";
+    public java.util.List<String> trustedIps = new java.util.ArrayList<>();
+    public java.util.List<String> trustedCidrs = new java.util.ArrayList<>();
+    public AutoThresholds thresholds = new AutoThresholds();
+  }
+
+  public static final class AutoThresholds {
+    public Threshold connections = new Threshold();
+    public Threshold pings = new Threshold();
+    public Threshold badUsernames = new Threshold();
+  }
+
+  public static final class Threshold {
+    public int limit = 0;
+    public int windowSeconds = 0;
   }
 
   public static Config loadOrCreateDefault(Path path, Logger log) throws Exception {
@@ -184,6 +206,17 @@ public final class Config {
         moderation:
           enabled: true
           dataFile: "moderation.yml"
+        autoIpBan:
+          enabled: false
+          dryRun: false
+          banMinutes: 60
+          reasonPrefix: "Auto-ban"
+          trustedIps: []
+          trustedCidrs: []
+          thresholds:
+            connections: { limit: 10, windowSeconds: 10 }
+            pings:       { limit: 15, windowSeconds: 10 }
+            badUsernames:{ limit: 5,  windowSeconds: 60 }
         forcedHosts: {}
         """;
       Files.createDirectories(path.getParent());
@@ -216,6 +249,11 @@ public final class Config {
     if (cfg.messages == null) cfg.messages = new Messages();
     if (cfg.whitelist == null) cfg.whitelist = new Whitelist();
     if (cfg.moderation == null) cfg.moderation = new Moderation();
+    if (cfg.autoIpBan == null) cfg.autoIpBan = new AutoIpBan();
+    if (cfg.autoIpBan.thresholds == null) cfg.autoIpBan.thresholds = new AutoThresholds();
+    if (cfg.autoIpBan.thresholds.connections == null) cfg.autoIpBan.thresholds.connections = new Threshold();
+    if (cfg.autoIpBan.thresholds.pings == null) cfg.autoIpBan.thresholds.pings = new Threshold();
+    if (cfg.autoIpBan.thresholds.badUsernames == null) cfg.autoIpBan.thresholds.badUsernames = new Threshold();
     if (cfg.forcedHosts == null) cfg.forcedHosts = new LinkedHashMap<>();
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;

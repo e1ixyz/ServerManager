@@ -5,12 +5,14 @@ import org.slf4j.Logger;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 
 public final class ModerationService {
   public enum Type { BAN, IPBAN, MUTE }
@@ -47,6 +49,25 @@ public final class ModerationService {
     Entry e = new Entry(Type.IPBAN, null, normalized, null, reason, actor, now(), expiresAt);
     bansByIp.put(normalized, e);
     persist();
+  }
+
+  public Entry banIpAsync(String ip, String reason, String actor, long expiresAt) {
+    String normalized = normalizeIp(ip);
+    if (normalized == null) return null;
+    Entry e = new Entry(Type.IPBAN, null, normalized, null, reason, actor, now(), expiresAt);
+    synchronized (this) {
+      bansByIp.put(normalized, e);
+    }
+    CompletableFuture.runAsync(() -> {
+      synchronized (this) {
+        try {
+          persist();
+        } catch (IOException ex) {
+          log.error("Failed to persist auto-ban {}", normalized, ex);
+        }
+      }
+    });
+    return e;
   }
 
   public synchronized boolean unban(UUID uuid, String ip) throws IOException {
@@ -140,7 +161,13 @@ public final class ModerationService {
     bansByIp.clear();
     mutesByUuid.clear();
     if (!Files.exists(dataFile)) return;
-    Object parsed = yaml.load(Files.readString(dataFile, StandardCharsets.UTF_8));
+    Object parsed;
+    try {
+      parsed = yaml.load(Files.readString(dataFile, StandardCharsets.UTF_8));
+    } catch (RuntimeException ex) {
+      log.warn("Failed to parse moderation data {}", dataFile.toString().replace('\\','/'), ex);
+      return;
+    }
     if (!(parsed instanceof Iterable<?> iterable)) return;
     for (Object obj : iterable) {
       if (!(obj instanceof Map<?,?> map)) continue;
@@ -203,7 +230,16 @@ public final class ModerationService {
   private String normalizeIp(String ip) {
     if (ip == null) return null;
     String s = ip.trim();
-    return s.isEmpty() ? null : s;
+    if (s.startsWith("/")) s = s.substring(1);
+    if (s.isEmpty()) return null;
+    if (s.contains(":") && s.indexOf(':') == s.lastIndexOf(':') && s.contains(".")) {
+      s = s.substring(0, s.indexOf(':'));
+    }
+    try {
+      return InetAddress.getByName(s).getHostAddress();
+    } catch (Exception ignored) {
+      return s;
+    }
   }
 
   private long now() { return System.currentTimeMillis(); }
