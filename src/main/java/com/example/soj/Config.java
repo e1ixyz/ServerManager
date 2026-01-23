@@ -6,7 +6,9 @@ import org.yaml.snakeyaml.Yaml;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public final class Config {
@@ -66,6 +68,19 @@ public final class Config {
     public String bannedMessage  = "<red>You are banned.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>";
     public String mutedMessage   = "<red>You are muted.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>";
     public String warnMessage    = "<yellow>You have been warned: <reason></yellow>";
+    public List<String> stealthBanKickMessages = new ArrayList<>(defaultStealthBanKickMessages());
+
+    public static List<String> defaultStealthBanKickMessages() {
+      return List.of(
+          "Internal Exception: java.net.SocketException: Connection reset",
+          "Disconnected",
+          "Failed to connect to server",
+          "Invalid Session (Try restarting your game)",
+          "Failed to verify username!",
+          "Connection lost",
+          "Timed out"
+      );
+    }
   }
 
   public static final class Whitelist {
@@ -167,6 +182,14 @@ public final class Config {
           bannedMessage:  "<red>You are banned.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>"
           mutedMessage:   "<red>You are muted.</red><newline><gray>Reason: <reason></gray><newline><gray>Expires: <expiry></gray>"
           warnMessage:    "<yellow>You have been warned: <reason></yellow>"
+          stealthBanKickMessages:
+            - "Internal Exception: java.net.SocketException: Connection reset"
+            - "Disconnected"
+            - "Failed to connect to server"
+            - "Invalid Session (Try restarting your game)"
+            - "Failed to verify username!"
+            - "Connection lost"
+            - "Timed out"
         servers:
           lobby:
             startOnJoin: true
@@ -247,6 +270,9 @@ public final class Config {
 
     if (cfg.motd == null) cfg.motd = new Motd();
     if (cfg.messages == null) cfg.messages = new Messages();
+    if (cfg.messages.stealthBanKickMessages == null || cfg.messages.stealthBanKickMessages.isEmpty()) {
+      cfg.messages.stealthBanKickMessages = new ArrayList<>(Messages.defaultStealthBanKickMessages());
+    }
     if (cfg.whitelist == null) cfg.whitelist = new Whitelist();
     if (cfg.moderation == null) cfg.moderation = new Moderation();
     if (cfg.autoIpBan == null) cfg.autoIpBan = new AutoIpBan();

@@ -20,6 +20,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -65,6 +66,7 @@ public final class ModerationCommands implements SimpleCommand {
 
     switch (alias) {
       case "ban" -> handleBan(src, args);
+      case "stealthban" -> handleStealthBan(src, args);
       case "ipban" -> handleIpBan(src, args);
       case "unban" -> handleUnban(src, args);
       case "mute" -> handleMute(src, args);
@@ -83,7 +85,7 @@ public final class ModerationCommands implements SimpleCommand {
     if (!moderation.enabled()) return List.of();
 
     return switch (alias) {
-      case "ban", "ipban", "mute", "unmute", "warn", "unban" -> suggestPlayers(args);
+      case "ban", "stealthban", "ipban", "mute", "unmute", "warn", "unban" -> suggestPlayers(args);
       case "banlist", "mutelist" -> List.of();
       default -> List.of();
     };
@@ -119,6 +121,37 @@ public final class ModerationCommands implements SimpleCommand {
     proxy.getPlayer(target.uuid).ifPresent(p -> p.disconnect(
         moderationMessage(cfg.messages.bannedMessage, p.getUsername(), parsed.reason, expiresAt)));
     src.sendMessage(Component.text("Banned " + target.display() + suffix(expiresAt) + reasonSuffix(parsed.reason)));
+  }
+
+  private void handleStealthBan(CommandSource src, String[] args) {
+    if (!has(src, "servermanager.moderation.stealthban", "servermanager.moderation.ban")) {
+      src.sendMessage(Component.text("You don't have permission."));
+      return;
+    }
+    if (args.length < 1) {
+      src.sendMessage(Component.text("Usage: /stealthban <player> [duration] [reason]"));
+      return;
+    }
+    Target target = resolveTarget(args[0]);
+    if (target.uuid == null) {
+      src.sendMessage(Component.text("Player must be online or a valid UUID."));
+      return;
+    }
+    ParsedAction parsed = parseDurationAndReason(args, 1, "Banned by " + nameOf(src));
+    if (parsed.invalid) {
+      src.sendMessage(Component.text("Invalid duration. Use values like 30m, 2h, 1d, or forever."));
+      return;
+    }
+    long expiresAt = parsed.durationSeconds <= 0 ? 0 : System.currentTimeMillis() + parsed.durationSeconds * 1000L;
+    try {
+      moderation.banUuid(target.uuid, target.name(), parsed.reason, nameOf(src), expiresAt, ModerationService.Type.STEALTH_BAN);
+    } catch (IOException ex) {
+      log.error("Failed to stealth-ban player", ex);
+      src.sendMessage(Component.text("Failed to update ban list: " + ex.getMessage()));
+      return;
+    }
+    proxy.getPlayer(target.uuid).ifPresent(p -> p.disconnect(Component.text(randomStealthKickMessage())));
+    src.sendMessage(Component.text("Stealth-banned " + target.display() + suffix(expiresAt) + reasonSuffix(parsed.reason)));
   }
 
   private void handleIpBan(CommandSource src, String[] args) {
@@ -585,6 +618,19 @@ public final class ModerationCommands implements SimpleCommand {
   private String reasonSuffix(String reason) {
     if (reason == null || reason.isBlank()) return "";
     return " for: " + reason;
+  }
+
+  private String randomStealthKickMessage() {
+    List<String> messages = cfg.messages.stealthBanKickMessages;
+    if (messages == null || messages.isEmpty()) {
+      messages = Config.Messages.defaultStealthBanKickMessages();
+    }
+    int idx = ThreadLocalRandom.current().nextInt(messages.size());
+    String msg = messages.get(idx);
+    if (msg == null || msg.isBlank()) {
+      return "Disconnected";
+    }
+    return msg;
   }
 
   private static String normalize(String s) {

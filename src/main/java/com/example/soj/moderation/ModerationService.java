@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 
 public final class ModerationService {
-  public enum Type { BAN, IPBAN, MUTE }
+  public enum Type { BAN, STEALTH_BAN, IPBAN, MUTE }
   public record Entry(Type type, UUID uuid, String ip, String name, String reason, String actor, long createdAt, long expiresAt) {}
 
   private final Config.Moderation cfg;
@@ -38,7 +38,13 @@ public final class ModerationService {
   public boolean enabled() { return cfg != null && cfg.enabled; }
 
   public synchronized void banUuid(UUID uuid, String name, String reason, String actor, long expiresAt) throws IOException {
-    Entry e = new Entry(Type.BAN, uuid, null, name, reason, actor, now(), expiresAt);
+    banUuid(uuid, name, reason, actor, expiresAt, Type.BAN);
+  }
+
+  public synchronized void banUuid(UUID uuid, String name, String reason, String actor, long expiresAt, Type type) throws IOException {
+    if (uuid == null) return;
+    Type stored = (type == null || type == Type.MUTE || type == Type.IPBAN) ? Type.BAN : type;
+    Entry e = new Entry(stored, uuid, null, name, reason, actor, now(), expiresAt);
     bansByUuid.put(uuid, e);
     persist();
   }
@@ -183,7 +189,7 @@ public final class ModerationService {
       long expires = parseLong(map.get("expiresAt"), 0);
       Entry e = new Entry(type, uuid, ip, name, reason, actor, created, expires);
       switch (type) {
-        case BAN -> { if (uuid != null) bansByUuid.put(uuid, e); }
+        case BAN, STEALTH_BAN -> { if (uuid != null) bansByUuid.put(uuid, e); }
         case IPBAN -> { if (ip != null) bansByIp.put(ip, e); }
         case MUTE -> { if (uuid != null) mutesByUuid.put(uuid, e); }
       }

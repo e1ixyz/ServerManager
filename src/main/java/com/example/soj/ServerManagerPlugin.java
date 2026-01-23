@@ -172,6 +172,7 @@ public final class ServerManagerPlugin {
       moderationCommands = new ModerationCommands(proxy, config, moderation, whitelistService, logger);
       var cm = proxy.getCommandManager();
       cm.register(cm.metaBuilder("ban").plugin(this).build(), moderationCommands);
+      cm.register(cm.metaBuilder("stealthban").aliases("sban").plugin(this).build(), moderationCommands);
       cm.register(cm.metaBuilder("ipban").plugin(this).build(), moderationCommands);
       cm.register(cm.metaBuilder("unban").plugin(this).build(), moderationCommands);
       cm.register(cm.metaBuilder("mute").plugin(this).build(), moderationCommands);

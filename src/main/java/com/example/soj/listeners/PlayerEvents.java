@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Features:
@@ -264,7 +265,7 @@ public final class PlayerEvents {
     if (moderation != null && moderation.enabled()) {
       var ban = moderation.findBan(joining.getUniqueId(), remoteIp(joining));
       if (ban != null) {
-        Component msg = buildModerationMessage(cfg.messages.bannedMessage, joining.getUsername(), ban);
+        Component msg = buildBanKickMessage(joining, ban);
         e.setResult(LoginEvent.ComponentResult.denied(msg));
         log.info("Denied {} (banned) at login.", joining.getUsername());
         return;
@@ -275,14 +276,14 @@ public final class PlayerEvents {
       String ip = remoteIp(joining);
       var decision = autoIpBan.record(ip, AutoIpBanService.EventType.CONNECTION, joining.getUsername());
       if (decision.banned() && decision.entry() != null) {
-        Component msg = buildModerationMessage(cfg.messages.bannedMessage, joining.getUsername(), decision.entry());
+        Component msg = buildBanKickMessage(joining, decision.entry());
         e.setResult(LoginEvent.ComponentResult.denied(msg));
         return;
       }
       if (autoIpBan.isBadUsername(joining.getUsername())) {
         var badDecision = autoIpBan.record(ip, AutoIpBanService.EventType.BAD_USERNAME, joining.getUsername());
         if (badDecision.banned() && badDecision.entry() != null) {
-          Component msg = buildModerationMessage(cfg.messages.bannedMessage, joining.getUsername(), badDecision.entry());
+          Component msg = buildBanKickMessage(joining, badDecision.entry());
           e.setResult(LoginEvent.ComponentResult.denied(msg));
           return;
         }
@@ -825,7 +826,7 @@ public final class PlayerEvents {
     if (moderation == null || !moderation.enabled()) return false;
     var entry = moderation.findBan(player.getUniqueId(), remoteIp(player));
     if (entry == null) return false;
-    Component msg = buildModerationMessage(cfg.messages.bannedMessage, player.getUsername(), entry);
+    Component msg = buildBanKickMessage(player, entry);
     if (disconnect) {
       player.disconnect(msg);
     } else {
@@ -969,6 +970,26 @@ public final class PlayerEvents {
         Placeholder.unparsed("player", player == null ? "" : player),
         Placeholder.unparsed("reason", reason),
         Placeholder.unparsed("expiry", expiry));
+  }
+
+  private Component buildBanKickMessage(Player player, ModerationService.Entry entry) {
+    if (entry != null && entry.type() == ModerationService.Type.STEALTH_BAN) {
+      return Component.text(randomStealthKickMessage());
+    }
+    return buildModerationMessage(cfg.messages.bannedMessage, player == null ? "" : player.getUsername(), entry);
+  }
+
+  private String randomStealthKickMessage() {
+    List<String> messages = cfg.messages.stealthBanKickMessages;
+    if (messages == null || messages.isEmpty()) {
+      messages = Config.Messages.defaultStealthBanKickMessages();
+    }
+    int idx = ThreadLocalRandom.current().nextInt(messages.size());
+    String msg = messages.get(idx);
+    if (msg == null || msg.isBlank()) {
+      return "Disconnected";
+    }
+    return msg;
   }
 
   private long secondsUntil(long millisEpoch) {
