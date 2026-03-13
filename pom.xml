@@ -3,7 +3,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>dev.elimcgehee</groupId>
+  <groupId>dev.e1ixyz</groupId>
   <artifactId>servermanager</artifactId>
   <version>0.1.0</version>
   <name>ServerManager</name>
@@ -71,7 +71,7 @@
                 <!-- Relocate SnakeYAML to avoid clashes -->
                 <relocation>
                   <pattern>org.yaml.snakeyaml</pattern>
-                  <shadedPattern>dev.elimcgehee.servermanager.lib.snakeyaml</shadedPattern>
+                  <shadedPattern>dev.e1ixyz.servermanager.lib.snakeyaml</shadedPattern>
                 </relocation>
               </relocations>
               <createDependencyReducedPom>true</createDependencyReducedPom>

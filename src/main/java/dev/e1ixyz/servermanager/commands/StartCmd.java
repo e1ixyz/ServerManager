@@ -1,7 +1,7 @@
-package dev.elimcgehee.servermanager.commands;
+package dev.e1ixyz.servermanager.commands;
 
-import dev.elimcgehee.servermanager.Config;
-import dev.elimcgehee.servermanager.ServerProcessManager;
+import dev.e1ixyz.servermanager.Config;
+import dev.e1ixyz.servermanager.ServerProcessManager;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import net.kyori.adventure.text.Component;

@@ -1,11 +1,11 @@
-package dev.elimcgehee.servermanager.commands;
+package dev.e1ixyz.servermanager.commands;
 
-import dev.elimcgehee.servermanager.Config;
-import dev.elimcgehee.servermanager.ServerManagerPlugin;
-import dev.elimcgehee.servermanager.ServerProcessManager;
-import dev.elimcgehee.servermanager.moderation.ModerationService;
-import dev.elimcgehee.servermanager.whitelist.VanillaWhitelistChecker;
-import dev.elimcgehee.servermanager.whitelist.WhitelistService;
+import dev.e1ixyz.servermanager.Config;
+import dev.e1ixyz.servermanager.ServerManagerPlugin;
+import dev.e1ixyz.servermanager.ServerProcessManager;
+import dev.e1ixyz.servermanager.moderation.ModerationService;
+import dev.e1ixyz.servermanager.whitelist.VanillaWhitelistChecker;
+import dev.e1ixyz.servermanager.whitelist.WhitelistService;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;

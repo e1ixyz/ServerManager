@@ -1,4 +1,4 @@
-package dev.elimcgehee.servermanager;
+package dev.e1ixyz.servermanager;
 
 public final class ServerConfig {
   public Boolean startOnJoin = false;

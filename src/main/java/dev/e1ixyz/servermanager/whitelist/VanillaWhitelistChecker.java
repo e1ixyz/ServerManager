@@ -1,7 +1,7 @@
-package dev.elimcgehee.servermanager.whitelist;
+package dev.e1ixyz.servermanager.whitelist;
 
-import dev.elimcgehee.servermanager.Config;
-import dev.elimcgehee.servermanager.ServerConfig;
+import dev.e1ixyz.servermanager.Config;
+import dev.e1ixyz.servermanager.ServerConfig;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.Yaml;
 

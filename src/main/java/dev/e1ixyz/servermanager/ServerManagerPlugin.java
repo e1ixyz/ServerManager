@@ -1,11 +1,11 @@
-package dev.elimcgehee.servermanager;
+package dev.e1ixyz.servermanager;
 
-import dev.elimcgehee.servermanager.commands.ServerManagerCmd;
-import dev.elimcgehee.servermanager.listeners.PlayerEvents;
-import dev.elimcgehee.servermanager.moderation.ModerationService;
-import dev.elimcgehee.servermanager.whitelist.WhitelistHttpServer;
-import dev.elimcgehee.servermanager.whitelist.WhitelistService;
-import dev.elimcgehee.servermanager.whitelist.VanillaWhitelistChecker;
+import dev.e1ixyz.servermanager.commands.ServerManagerCmd;
+import dev.e1ixyz.servermanager.listeners.PlayerEvents;
+import dev.e1ixyz.servermanager.moderation.ModerationService;
+import dev.e1ixyz.servermanager.whitelist.WhitelistHttpServer;
+import dev.e1ixyz.servermanager.whitelist.WhitelistService;
+import dev.e1ixyz.servermanager.whitelist.VanillaWhitelistChecker;
 import com.google.inject.Inject;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
@@ -18,7 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.UUID;
-import dev.elimcgehee.servermanager.commands.ModerationCommands;
+import dev.e1ixyz.servermanager.commands.ModerationCommands;
 
 @Plugin(
   id = "servermanager",

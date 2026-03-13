@@ -1,6 +1,6 @@
-package dev.elimcgehee.servermanager.moderation;
+package dev.e1ixyz.servermanager.moderation;
 
-import dev.elimcgehee.servermanager.Config;
+import dev.e1ixyz.servermanager.Config;
 import org.slf4j.Logger;
 
 import java.net.InetAddress;

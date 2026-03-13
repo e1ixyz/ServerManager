@@ -1,6 +1,6 @@
-package dev.elimcgehee.servermanager.whitelist;
+package dev.e1ixyz.servermanager.whitelist;
 
-import dev.elimcgehee.servermanager.Config;
+import dev.e1ixyz.servermanager.Config;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;

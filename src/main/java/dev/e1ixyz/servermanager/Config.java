@@ -1,4 +1,4 @@
-package dev.elimcgehee.servermanager;
+package dev.e1ixyz.servermanager;
 
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.Yaml;

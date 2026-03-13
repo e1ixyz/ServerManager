@@ -1,11 +1,11 @@
-package dev.elimcgehee.servermanager.listeners;
+package dev.e1ixyz.servermanager.listeners;
 
-import dev.elimcgehee.servermanager.Config;
-import dev.elimcgehee.servermanager.ServerProcessManager;
-import dev.elimcgehee.servermanager.moderation.AutoIpBanService;
-import dev.elimcgehee.servermanager.moderation.ModerationService;
-import dev.elimcgehee.servermanager.whitelist.VanillaWhitelistChecker;
-import dev.elimcgehee.servermanager.whitelist.WhitelistService;
+import dev.e1ixyz.servermanager.Config;
+import dev.e1ixyz.servermanager.ServerProcessManager;
+import dev.e1ixyz.servermanager.moderation.AutoIpBanService;
+import dev.e1ixyz.servermanager.moderation.ModerationService;
+import dev.e1ixyz.servermanager.whitelist.VanillaWhitelistChecker;
+import dev.e1ixyz.servermanager.whitelist.WhitelistService;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.LoginEvent;
