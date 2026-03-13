@@ -21,7 +21,7 @@ Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist beha
 ## Requirements
 - Java 17+ for the Velocity proxy runtime
 - Java 21+ in backend launch scripts for Paper/Spigot 1.21.11
-- Velocity 3.4.0-SNAPSHOT-534 (or the API version you build against)
+- Velocity 3.4.0 (or newer 3.4.x build)
 - Maven (for building from source)
 - Paper/Spigot 1.21.11 servers that can be launched via command line within their working directory
 
@@ -30,13 +30,13 @@ Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist beha
    ```bash
    mvn clean package
    ```
-   Maven is configured to pull the Velocity API snapshot (3.4.0-SNAPSHOT) from PaperMC/Velocity repos. If your specific build number is not available there, install the JAR manually with:
+   Maven pulls dependencies from the PaperMC public repository. If you need to pin a custom API build, install it manually with:
    ```bash
    mvn install:install-file \
-     -Dfile=/path/to/velocity-3.4.0-SNAPSHOT.jar \
+     -Dfile=/path/to/velocity-api.jar \
      -DgroupId=com.velocitypowered \
      -DartifactId=velocity-api \
-     -Dversion=3.4.0-SNAPSHOT \
+     -Dversion=3.4.0 \
      -Dpackaging=jar
    ```
 2. The shaded plugin JAR will be created at `target/servermanager-0.1.0.jar`.
@@ -248,7 +248,7 @@ Durations default to minutes when no unit is supplied. Use `forever` for an inde
 
 ### Whitelist management (`/sm whitelist`)
 - `network list` shows the first 20 entries in `network-whitelist.yml` (with a count of any remaining). Use `network add <player|uuid> [name]` to add an online player or explicit UUID, and `network remove <player|uuid>` to revoke access. Adding a player mirrors them into every server that sets `mirrorNetworkWhitelist: true`.
-- `vanilla <server> list` dumps the current contents of that backend's `whitelist.json`. `vanilla <server> add <player|uuid> [name]` accepts either a UUID/online player or just a username (UUID preferred). Removals accept UUIDs or names as well, and active backends also receive a live `/whitelist add|remove ...` command for immediate effect. Use `vanilla <server> on|off|status` to enable/disable or query the backend's vanilla whitelist (writes `server.properties` and sends `/whitelist on|off` when online).
+- `vanilla <server> list` dumps the current contents of that backend's `whitelist.json`. `vanilla <server> add <player|uuid> [name]` accepts either a UUID/online player or just a username (UUID preferred). Removals accept UUIDs or names as well, and active backends also receive a live `/whitelist add|remove ...` command when a name is available (or `/whitelist reload` for UUID-only updates). Use `vanilla <server> on|off|status` to enable/disable or query the backend's vanilla whitelist (writes `server.properties` and sends `/whitelist on|off` when online).
 - UUID arguments may omit dashes. When only a UUID is supplied the plugin tries to reuse the last known username from the network whitelist, ban list, or live player list.
 
 ### Moderation commands (standalone)

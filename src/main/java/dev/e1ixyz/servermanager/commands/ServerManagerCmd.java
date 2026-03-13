@@ -186,6 +186,17 @@ public final class ServerManagerCmd implements SimpleCommand {
         UUID uuid = parseUuidFlexible(args[1]);
         String nameHint = uuid == null ? args[1] : null;
         Optional<WhitelistService.Entry> before = whitelist.lookup(uuid, nameHint);
+        UUID resolvedUuid = uuid;
+        String resolvedName = nameHint;
+        if (before.isPresent()) {
+          WhitelistService.Entry entry = before.get();
+          if (resolvedUuid == null) {
+            resolvedUuid = entry.uuid();
+          }
+          if ((resolvedName == null || resolvedName.isBlank()) && entry.lastKnownName() != null && !entry.lastKnownName().isBlank()) {
+            resolvedName = entry.lastKnownName();
+          }
+        }
         boolean removed;
         try {
           removed = whitelist.remove(uuid, nameHint);
@@ -198,9 +209,8 @@ public final class ServerManagerCmd implements SimpleCommand {
           src.sendMessage(Component.text("No matching whitelist entry."));
           return;
         }
-        String finalName = before.map(WhitelistService.Entry::lastKnownName).orElse(nameHint);
-        plugin.removeNetworkWhitelistEntry(uuid, finalName);
-        src.sendMessage(Component.text("Removed " + displayName(finalName, uuid) + " from the network whitelist."));
+        plugin.removeNetworkWhitelistEntry(resolvedUuid, resolvedName);
+        src.sendMessage(Component.text("Removed " + displayName(resolvedName, resolvedUuid) + " from the network whitelist."));
       }
       default -> src.sendMessage(mm0(WL_NETWORK_USAGE));
     }
@@ -263,6 +273,8 @@ public final class ServerManagerCmd implements SimpleCommand {
         }
         if (target.name() != null && !target.name().isBlank()) {
           sendWhitelistCommand(server, "whitelist add " + target.name());
+        } else {
+          sendWhitelistCommand(server, "whitelist reload");
         }
         src.sendMessage(Component.text("Added " + displayName(target.name(), target.uuid()) + " to " + server + " whitelist."));
       }
@@ -286,6 +298,8 @@ public final class ServerManagerCmd implements SimpleCommand {
         }
         if (name != null && !name.isBlank()) {
           sendWhitelistCommand(server, "whitelist remove " + name);
+        } else {
+          sendWhitelistCommand(server, "whitelist reload");
         }
         src.sendMessage(Component.text("Removed " + displayName(name, uuid) + " from " + server + " whitelist."));
       }
