@@ -1,11 +1,11 @@
-package com.example.soj;
+package dev.elimcgehee.servermanager;
 
-import com.example.soj.commands.ServerManagerCmd;
-import com.example.soj.listeners.PlayerEvents;
-import com.example.soj.moderation.ModerationService;
-import com.example.soj.whitelist.WhitelistHttpServer;
-import com.example.soj.whitelist.WhitelistService;
-import com.example.soj.whitelist.VanillaWhitelistChecker;
+import dev.elimcgehee.servermanager.commands.ServerManagerCmd;
+import dev.elimcgehee.servermanager.listeners.PlayerEvents;
+import dev.elimcgehee.servermanager.moderation.ModerationService;
+import dev.elimcgehee.servermanager.whitelist.WhitelistHttpServer;
+import dev.elimcgehee.servermanager.whitelist.WhitelistService;
+import dev.elimcgehee.servermanager.whitelist.VanillaWhitelistChecker;
 import com.google.inject.Inject;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
@@ -18,7 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.UUID;
-import com.example.soj.commands.ModerationCommands;
+import dev.elimcgehee.servermanager.commands.ModerationCommands;
 
 @Plugin(
   id = "servermanager",
@@ -164,6 +164,19 @@ public final class ServerManagerPlugin {
   public void removeNetworkWhitelistEntry(UUID uuid, String name) {
     if (playerEvents != null) {
       playerEvents.removeFromMirrors(uuid, name);
+    }
+  }
+
+  public void sendBackendCommandWhenReady(String server, String command) {
+    if (server == null || command == null || command.isBlank()) return;
+    if (playerEvents != null) {
+      playerEvents.sendBackendCommandWhenReady(server, command);
+      return;
+    }
+    if (processManager != null && processManager.isRunning(server)) {
+      if (!processManager.sendCommand(server, command)) {
+        logger.warn("Failed to dispatch '{}' to {}", command, server);
+      }
     }
   }
 

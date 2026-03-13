@@ -1,8 +1,8 @@
-package com.example.soj.commands;
+package dev.elimcgehee.servermanager.commands;
 
-import com.example.soj.Config;
-import com.example.soj.moderation.ModerationService;
-import com.example.soj.whitelist.WhitelistService;
+import dev.elimcgehee.servermanager.Config;
+import dev.elimcgehee.servermanager.moderation.ModerationService;
+import dev.elimcgehee.servermanager.whitelist.WhitelistService;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
@@ -82,7 +82,7 @@ public final class ModerationCommands implements SimpleCommand {
   public List<String> suggest(Invocation inv) {
     String alias = inv.alias().toLowerCase(Locale.ROOT);
     String[] args = inv.arguments();
-    if (!moderation.enabled()) return List.of();
+    if (moderation == null || !moderation.enabled()) return List.of();
 
     return switch (alias) {
       case "ban", "stealthban", "ipban", "mute", "unmute", "warn", "unban" -> suggestPlayers(args);
@@ -373,18 +373,27 @@ public final class ModerationCommands implements SimpleCommand {
     if (args.length <= offset) {
       return new ParsedAction(0, defaultReason, false);
     }
-    long duration = parseDurationSeconds(args[offset]);
+    String token = args[offset];
+    long duration = parseDurationSeconds(token);
     boolean invalid = false;
     int reasonStart = offset;
-    if (duration > 0 || isForever(args[offset])) {
-      if (isForever(args[offset])) duration = 0;
+    if (duration > 0 || isForever(token)) {
+      if (isForever(token)) duration = 0;
       reasonStart = offset + 1;
     } else {
-      if (duration < 0) invalid = true;
+      // If this token looks like a duration typo (e.g. "10x"), reject it.
+      if (duration < 0 && looksLikeDurationToken(token)) invalid = true;
       duration = 0;
     }
     String reason = (args.length > reasonStart) ? joinArgs(args, reasonStart) : defaultReason;
     return new ParsedAction(duration, reason, invalid);
+  }
+
+  private boolean looksLikeDurationToken(String token) {
+    if (token == null) return false;
+    String trimmed = token.trim();
+    if (trimmed.isEmpty()) return false;
+    return Character.isDigit(trimmed.charAt(0));
   }
 
   private record ParsedAction(long durationSeconds, String reason, boolean invalid) {}

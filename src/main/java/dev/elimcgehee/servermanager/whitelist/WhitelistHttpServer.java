@@ -1,6 +1,6 @@
-package com.example.soj.whitelist;
+package dev.elimcgehee.servermanager.whitelist;
 
-import com.example.soj.Config;
+import dev.elimcgehee.servermanager.Config;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;

@@ -1,11 +1,11 @@
-package com.example.soj.commands;
+package dev.elimcgehee.servermanager.commands;
 
-import com.example.soj.Config;
-import com.example.soj.ServerManagerPlugin;
-import com.example.soj.ServerProcessManager;
-import com.example.soj.moderation.ModerationService;
-import com.example.soj.whitelist.VanillaWhitelistChecker;
-import com.example.soj.whitelist.WhitelistService;
+import dev.elimcgehee.servermanager.Config;
+import dev.elimcgehee.servermanager.ServerManagerPlugin;
+import dev.elimcgehee.servermanager.ServerProcessManager;
+import dev.elimcgehee.servermanager.moderation.ModerationService;
+import dev.elimcgehee.servermanager.whitelist.VanillaWhitelistChecker;
+import dev.elimcgehee.servermanager.whitelist.WhitelistService;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
@@ -731,11 +731,8 @@ public final class ServerManagerCmd implements SimpleCommand {
   }
 
   private void sendWhitelistCommand(String server, String command) {
-    if (command == null || command.isBlank() || mgr == null) return;
-    if (!mgr.isRunning(server)) return;
-    if (!mgr.sendCommand(server, command)) {
-      log.warn("Failed to dispatch '{}' to {}", command, server);
-    }
+    if (command == null || command.isBlank()) return;
+    plugin.sendBackendCommandWhenReady(server, command);
   }
 
   private String joinArgs(String[] args, int from) {

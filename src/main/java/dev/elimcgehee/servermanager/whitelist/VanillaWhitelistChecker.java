@@ -1,7 +1,7 @@
-package com.example.soj.whitelist;
+package dev.elimcgehee.servermanager.whitelist;
 
-import com.example.soj.Config;
-import com.example.soj.ServerConfig;
+import dev.elimcgehee.servermanager.Config;
+import dev.elimcgehee.servermanager.ServerConfig;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.Yaml;
 
@@ -169,7 +169,7 @@ public final class VanillaWhitelistChecker {
 
   private Cache loadIfNeeded(Path file, Cache existing) {
     try {
-      if (!Files.exists(file)) return existing;
+      if (!Files.exists(file)) return emptyCache(-1L);
       FileTime ft = Files.getLastModifiedTime(file);
       long lastModified = ft.toMillis();
       if (existing != null && existing.lastModified == lastModified) {
@@ -181,7 +181,7 @@ public final class VanillaWhitelistChecker {
         parsed = yaml.load(raw);
       } catch (RuntimeException ex) {
         log.warn("Failed to parse vanilla whitelist {}", file.toString().replace('\\','/'), ex);
-        return existing;
+        return emptyCache(lastModified);
       }
       Set<UUID> uuids = new HashSet<>();
       Set<String> namesWithoutUuid = new HashSet<>();
@@ -192,11 +192,15 @@ public final class VanillaWhitelistChecker {
       return new Cache(lastModified, uuids, namesWithoutUuid);
     } catch (IOException ex) {
       log.warn("Failed to read vanilla whitelist {}", file.toString().replace('\\','/'), ex);
-      return existing;
+      return emptyCache(-1L);
     } catch (RuntimeException ex) {
       log.warn("Failed to read vanilla whitelist {}", file.toString().replace('\\','/'), ex);
-      return existing;
+      return emptyCache(-1L);
     }
+  }
+
+  private Cache emptyCache(long lastModified) {
+    return new Cache(lastModified, Set.of(), Set.of());
   }
 
   private boolean ensureEntry(Path file, UUID uuid, String username) throws IOException {

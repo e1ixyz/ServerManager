@@ -2,6 +2,8 @@
 
 ServerManager is a Velocity plugin that keeps your backend Minecraft servers asleep until a player needs them. It starts Paper/Spigot servers on-demand, keeps players informed while they boot, and shuts them down again when everything is idle. The goal is to run zero unused processes without forcing players to manage connections manually.
 
+Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist behavior).
+
 ## Highlights
 - Starts the designated primary backend automatically on the first join and redirects the player with a customizable kick message.
 - Honors Velocity forced-host routing: when the proxy points a first-join at a non-primary backend, that server is started instead, with optional per-host MOTD and kick overrides.
@@ -14,12 +16,14 @@ ServerManager is a Velocity plugin that keeps your backend Minecraft servers asl
 - Built-in moderation: `/ban`, `/stealthban`, `/ipban`, `/unban`, `/mute`, `/unmute`, `/warn`, plus `/banlist` and `/mutelist`. Banned players are blocked at login so they cannot start backends.
 - In-game `/sm whitelist` tooling to view/add/remove entries from both the network whitelist and any managed vanilla `whitelist.json`.
 - Optional daily auto-restart time for servers held indefinitely, with 1-minute and 5-second warnings broadcast in-game.
+- Whitelist console sync commands are deferred until a backend is ping-ready, preventing startup-phase console errors.
 
 ## Requirements
-- Java 17+
+- Java 17+ for the Velocity proxy runtime
+- Java 21+ in backend launch scripts for Paper/Spigot 1.21.11
 - Velocity 3.4.0-SNAPSHOT-534 (or the API version you build against)
 - Maven (for building from source)
-- Paper/Spigot servers that can be launched via command line within their working directory
+- Paper/Spigot 1.21.11 servers that can be launched via command line within their working directory
 
 ## Building
 1. Compile and package:
@@ -124,7 +128,7 @@ servers:
     autoRestartHoldTime: ""
 
 whitelist:
-  enabled: true
+  enabled: false
   bind: "0.0.0.0"
   port: 8081
   baseUrl: "http://127.0.0.1:8081"
@@ -164,6 +168,7 @@ Key points:
 - `stopCommand` is written to the server stdin during graceful shutdown (`stop` for Paper).
 - If `logToFile` is true, stdout/stderr is redirected to `logFile`. Paths are resolved relative to `workingDir` when not absolute.
 - Each server entry may set `vanillaWhitelistBypassesNetwork` to grant players on that backend's `whitelist.json` access to the network whitelist automatically, and `mirrorNetworkWhitelist` to push every accepted player back into that backend's vanilla whitelist (including via `/whitelist add` while it is online). When omitted, the primary server keeps the legacy behavior (bypass + mirror) and other servers remain opt-in.
+- Live vanilla whitelist console updates are now held until the backend responds to ping; file updates always happen immediately so offline servers still apply changes on next boot.
 - `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
 - Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a short URL and one-time code and can redeem it through the built-in HTTP form.
 - `allowVanillaBypass: true` remains the default for the primary backend when the per-server flag is not set. Set it to `false` if you want even the primary server to ignore its vanilla whitelist entirely.
@@ -230,7 +235,7 @@ Root command aliases: `/servermanager`, `/sm`
 | `status`   | `servermanager.command.status` (wildcards supported) | Lists each managed server with an online/offline tag and marks the primary. |
 | `start`    | `servermanager.command.start`               | Boots the named managed server if it is offline. |
 | `stop`     | `servermanager.command.stop`                | Sends the graceful stop command to the backend. |
-| `help`     | _None_                                      | Prints the command overview along with `hold` syntax. |
+| `help`     | `servermanager.command.help`                | Prints the command overview along with `hold` syntax. |
 | `hold`     | `servermanager.command.hold`                | Keeps the backend running for the requested duration (accepts `30m`, `2h`, `1h30m`, or `forever`). Starts the server automatically if it is offline. |
 | `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
 | `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`, and toggles vanilla whitelist enforcement per server. |
@@ -238,8 +243,6 @@ Root command aliases: `/servermanager`, `/sm`
 Durations default to minutes when no unit is supplied. Use `forever` for an indefinite hold. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early. When a server is held forever and `autoRestartHoldTime` is set (HH:mm), it will automatically restart at that daily time with in-game warnings at 1 minute and 5 seconds.
 
 \* Any of `servermanager.command.*`, `servermanager.*`, or legacy `startonjoin.*` nodes also satisfy the checks. Console sources bypass permission checks automatically.
-
-Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for compatibility but delegate to the same logic.
 
 `/sm reload` refreshes the plugin runtime and whitelist services without interrupting running managed servers. Only servers removed from the configuration are stopped during the reload.
 
@@ -255,7 +258,7 @@ Legacy single-action commands (`/svstart`, `/svstop`, `/svstatus`) are kept for 
 - `/unban <player|ip>` — removes UUID/IP bans.
 - `/mute <player> [duration] [reason]` and `/unmute <player>` — mutes block chat and surface a clear muted message with expiry.
 - `/warn <player> [reason]` — notifies the player (not persisted).
-- `/banlist`, `/mutelist` — show the most recent 20 entries with expiry info.
+- `/banlist`, `/mutelist` — paginated list view (10 entries per page) with clickable detail output.
 Permissions: `servermanager.moderation.ban`, `.stealthban`, `.ipban`, `.unban`, `.mute`, `.unmute`, `.warn`, `.view` (lists). Console bypasses checks. Bans are enforced at login, before any backend starts.
 
 ## Logging
@@ -269,7 +272,6 @@ Permissions: `servermanager.moderation.ban`, `.stealthban`, `.ipban`, `.unban`, 
 - **Backends never stop**: Confirm `stopGraceSeconds` is set, that players actually disconnect, no admin hold is active, and that the stop command is correct. A background sweep now re-schedules stops for empty-but-running backends, so persistent stragglers will log a warning in the Velocity console (especially when `logToFile` is disabled).
 
 ## Development Notes
-- Package namespace defaults to `com.example.soj`. Rename the package and update build files if you fork.
 - `ServerManagerPlugin` handles lifecycle wiring, configuration migration, and command registration.
 - `ServerProcessManager` and `ManagedServer` encapsulate per-server process control.
 - `PlayerEvents` orchestrates player flow, MOTD updates, start queues, and shutdown scheduling.

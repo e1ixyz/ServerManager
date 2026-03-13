@@ -1,7 +1,7 @@
-package com.example.soj.commands;
+package dev.elimcgehee.servermanager.commands;
 
-import com.example.soj.Config;
-import com.example.soj.ServerProcessManager;
+import dev.elimcgehee.servermanager.Config;
+import dev.elimcgehee.servermanager.ServerProcessManager;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import net.kyori.adventure.text.Component;

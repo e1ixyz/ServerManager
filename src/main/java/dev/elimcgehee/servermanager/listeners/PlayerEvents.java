@@ -1,11 +1,11 @@
-package com.example.soj.listeners;
+package dev.elimcgehee.servermanager.listeners;
 
-import com.example.soj.Config;
-import com.example.soj.ServerProcessManager;
-import com.example.soj.moderation.AutoIpBanService;
-import com.example.soj.moderation.ModerationService;
-import com.example.soj.whitelist.VanillaWhitelistChecker;
-import com.example.soj.whitelist.WhitelistService;
+import dev.elimcgehee.servermanager.Config;
+import dev.elimcgehee.servermanager.ServerProcessManager;
+import dev.elimcgehee.servermanager.moderation.AutoIpBanService;
+import dev.elimcgehee.servermanager.moderation.ModerationService;
+import dev.elimcgehee.servermanager.whitelist.VanillaWhitelistChecker;
+import dev.elimcgehee.servermanager.whitelist.WhitelistService;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.LoginEvent;
@@ -27,12 +27,14 @@ import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -86,6 +88,9 @@ public final class PlayerEvents {
   private final Set<String> holdRestartInProgress = ConcurrentHashMap.newKeySet();
   /** Throttle auto-start attempts for held servers that went offline. */
   private final Map<String, Long> holdAutoStartAttemptMs = new ConcurrentHashMap<>();
+  /** Commands queued while a backend process is alive but not ping-ready yet. */
+  private final Map<String, Deque<String>> deferredBackendCommands = new ConcurrentHashMap<>();
+  private static final int MAX_DEFERRED_BACKEND_COMMANDS = 100;
   private static final long HOLD_AUTOSTART_COOLDOWN_MS = 30_000L;
   @SuppressWarnings("FieldCanBeLocal")
   private final ScheduledTask heartbeatTask;
@@ -175,6 +180,7 @@ public final class PlayerEvents {
         refreshHoldRestart(name);
         if (!mgr.isRunning(name)) {
           isReadyCache.put(name, Boolean.FALSE);
+          clearDeferredBackendCommands(name);
           if (mgr.isHoldActive(name)) {
             long now = System.currentTimeMillis();
             long lastAttempt = holdAutoStartAttemptMs.getOrDefault(name, 0L);
@@ -196,7 +202,11 @@ public final class PlayerEvents {
           scheduleStopIfServerEmpty(name);
         }
         proxy.getServer(name).ifPresent(rs -> rs.ping().whenComplete((ok, err) -> {
-          isReadyCache.put(name, err == null);
+          boolean ready = err == null;
+          isReadyCache.put(name, ready);
+          if (ready) {
+            flushDeferredBackendCommands(name);
+          }
         }));
       }
     }).delay(Duration.ofSeconds(1)).repeat(Duration.ofSeconds(2)).schedule();
@@ -718,6 +728,7 @@ public final class PlayerEvents {
       rs.ping().whenComplete((ping, err) -> {
         if (err != null) return; // still not ready
         isReadyCache.put(serverName, Boolean.TRUE);
+        flushDeferredBackendCommands(serverName);
 
         if (!serverName.equals(waitingTarget.get(id))) return;
         if (!readyNotifyOnce.add(id)) return; // already fired once for this wait
@@ -841,13 +852,9 @@ public final class PlayerEvents {
     for (String server : mirrorNetworkWhitelistServers) {
       vanillaWhitelist.ensureWhitelisted(server, uuid, name);
     }
-    if (name == null || name.isBlank()) return;
-    String cmd = "whitelist add " + name;
+    String cmd = (name == null || name.isBlank()) ? "whitelist reload" : ("whitelist add " + name);
     for (String server : mirrorNetworkWhitelistServers) {
-      if (!mgr.isRunning(server)) continue;
-      if (!mgr.sendCommand(server, cmd)) {
-        log.warn("Failed to dispatch '{}' to {} after whitelist sync", cmd, server);
-      }
+      sendBackendCommandWhenReady(server, cmd);
     }
   }
 
@@ -860,14 +867,58 @@ public final class PlayerEvents {
         log.warn("Failed to remove whitelist entry from {}", server, ex);
       }
     }
-    if (name == null || name.isBlank()) return;
-    String cmd = "whitelist remove " + name;
+    String cmd = (name == null || name.isBlank()) ? "whitelist reload" : ("whitelist remove " + name);
     for (String server : mirrorNetworkWhitelistServers) {
-      if (!mgr.isRunning(server)) continue;
-      if (!mgr.sendCommand(server, cmd)) {
-        log.warn("Failed to dispatch '{}' to {} after whitelist removal", cmd, server);
-      }
+      sendBackendCommandWhenReady(server, cmd);
     }
+  }
+
+  public void sendBackendCommandWhenReady(String server, String command) {
+    if (server == null || command == null) return;
+    String normalized = command.trim();
+    if (normalized.isEmpty()) return;
+    if (!mgr.isKnown(server) || !mgr.isRunning(server)) return;
+
+    if (isReady(server)) {
+      if (!mgr.sendCommand(server, normalized)) {
+        log.warn("Failed to dispatch '{}' to {}", normalized, server);
+      }
+      return;
+    }
+
+    Deque<String> queue = deferredBackendCommands.computeIfAbsent(server, k -> new ConcurrentLinkedDeque<>());
+    while (queue.size() >= MAX_DEFERRED_BACKEND_COMMANDS) {
+      queue.pollFirst();
+    }
+    queue.offerLast(normalized);
+    log.info("[{}] deferred console command until backend is ready: {}", server, normalized);
+  }
+
+  private void flushDeferredBackendCommands(String server) {
+    Deque<String> queue = deferredBackendCommands.get(server);
+    if (queue == null || queue.isEmpty()) return;
+    if (!mgr.isRunning(server) || !isReady(server)) return;
+
+    int sent = 0;
+    while (true) {
+      String cmd = queue.pollFirst();
+      if (cmd == null) break;
+      if (!mgr.sendCommand(server, cmd)) {
+        queue.offerFirst(cmd);
+        break;
+      }
+      sent++;
+    }
+    if (queue.isEmpty()) {
+      deferredBackendCommands.remove(server, queue);
+    }
+    if (sent > 0) {
+      log.info("[{}] dispatched {} queued console command(s) after startup.", server, sent);
+    }
+  }
+
+  private void clearDeferredBackendCommands(String server) {
+    deferredBackendCommands.remove(server);
   }
 
   private String resolveKickMessage(Config.ForcedHost hostCfg) {
@@ -1062,6 +1113,7 @@ public final class PlayerEvents {
     });
     holdRestartTasks.clear();
     holdRestartInProgress.clear();
+    deferredBackendCommands.clear();
     heartbeatTask.cancel();
   }
 }

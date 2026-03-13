@@ -1,6 +1,6 @@
-package com.example.soj.moderation;
+package dev.elimcgehee.servermanager.moderation;
 
-import com.example.soj.Config;
+import dev.elimcgehee.servermanager.Config;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.Yaml;
 

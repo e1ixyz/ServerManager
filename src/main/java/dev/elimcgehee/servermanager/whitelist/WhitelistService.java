@@ -1,6 +1,6 @@
-package com.example.soj.whitelist;
+package dev.elimcgehee.servermanager.whitelist;
 
-import com.example.soj.Config;
+import dev.elimcgehee.servermanager.Config;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.Yaml;
 

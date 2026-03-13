@@ -1,4 +1,4 @@
-package com.example.soj;
+package dev.elimcgehee.servermanager;
 
 import org.slf4j.Logger;
 
