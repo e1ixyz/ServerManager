@@ -201,6 +201,7 @@ public final class Config {
             vanillaWhitelistBypassesNetwork: true
             mirrorNetworkWhitelist: true
             autoRestartHoldTime: "05:00"
+            openConsoleWindow: false
           survival:
             startOnJoin: false
             workingDir: "../survival"
@@ -211,6 +212,7 @@ public final class Config {
             vanillaWhitelistBypassesNetwork: false
             mirrorNetworkWhitelist: false
             autoRestartHoldTime: ""
+            openConsoleWindow: false
         whitelist:
           enabled: false
           bind: "0.0.0.0"

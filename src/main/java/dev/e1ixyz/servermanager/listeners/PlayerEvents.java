@@ -94,6 +94,7 @@ public final class PlayerEvents {
   private static final long HOLD_AUTOSTART_COOLDOWN_MS = 30_000L;
   @SuppressWarnings("FieldCanBeLocal")
   private final ScheduledTask heartbeatTask;
+  private volatile boolean shuttingDown;
 
   private static final class RestartSchedule {
     final long restartAtMs;
@@ -176,6 +177,7 @@ public final class PlayerEvents {
 
     // Periodically ping all known servers to update readiness (for accurate MOTD)
     this.heartbeatTask = proxy.getScheduler().buildTask(pluginOwner, () -> {
+      if (shuttingDown) return;
       for (String name : cfg.servers.keySet()) {
         refreshHoldRestart(name);
         if (!mgr.isRunning(name)) {
@@ -558,6 +560,10 @@ public final class PlayerEvents {
 
   // -------------------- Indefinite hold auto-restart --------------------
   private void refreshHoldRestart(String serverName) {
+    if (shuttingDown) {
+      cancelHoldRestart(serverName);
+      return;
+    }
     var sc = cfg.servers.get(serverName);
     if (sc == null) {
       cancelHoldRestart(serverName);
@@ -589,6 +595,7 @@ public final class PlayerEvents {
   }
 
   private void scheduleHoldRestart(String serverName, long delayMs, String time) {
+    if (shuttingDown) return;
     cancelHoldRestart(serverName);
 
     long now = System.currentTimeMillis();
@@ -611,7 +618,16 @@ public final class PlayerEvents {
     }
 
     rs.restart = proxy.getScheduler().buildTask(pluginOwner, () -> {
+      if (shuttingDown) {
+        holdRestartTasks.remove(serverName);
+        return;
+      }
       if (!holdRestartInProgress.add(serverName)) {
+        return;
+      }
+      if (shuttingDown) {
+        holdRestartTasks.remove(serverName);
+        holdRestartInProgress.remove(serverName);
         return;
       }
       notifyPlayers(serverName, mm(cfg.messages.holdRestartNow, serverName, ""));
@@ -630,9 +646,11 @@ public final class PlayerEvents {
       } finally {
         holdRestartTasks.remove(serverName);
         holdRestartInProgress.remove(serverName);
-        long nextDelay = millisUntil(time);
-        if (nextDelay > 0) {
-          scheduleHoldRestart(serverName, nextDelay, time);
+        if (!shuttingDown) {
+          long nextDelay = millisUntil(time);
+          if (nextDelay > 0) {
+            scheduleHoldRestart(serverName, nextDelay, time);
+          }
         }
       }
     }).delay(Duration.ofMillis(delayMs)).schedule();
@@ -1093,6 +1111,7 @@ public final class PlayerEvents {
   }
 
   public void shutdown() {
+    shuttingDown = true;
     ScheduledTask stopAll = pendingStopAll;
     if (stopAll != null) {
       stopAll.cancel();

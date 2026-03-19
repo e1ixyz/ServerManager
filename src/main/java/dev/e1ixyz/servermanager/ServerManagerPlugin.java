@@ -74,6 +74,9 @@ public final class ServerManagerPlugin {
   public void onShutdown(ProxyShutdownEvent e) {
     try {
       logger.info("Proxy shutting down; stopping any running managed servers...");
+      if (processManager != null) {
+        processManager.beginShutdown();
+      }
       if (whitelistHttpServer != null) {
         whitelistHttpServer.stop();
       }

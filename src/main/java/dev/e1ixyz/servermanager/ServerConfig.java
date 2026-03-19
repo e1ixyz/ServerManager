@@ -24,4 +24,10 @@ public final class ServerConfig {
    * Warnings are sent at 1 minute and 5 seconds before the restart kicks in.
    */
   public String autoRestartHoldTime;
+  /**
+   * macOS only: when enabled, opens a separate Terminal window that tails this backend's log file.
+   * The window closes when ServerManager observes the backend stopping.
+   * Requires logToFile=true.
+   */
+  public Boolean openConsoleWindow = false;
 }

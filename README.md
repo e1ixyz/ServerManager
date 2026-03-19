@@ -115,6 +115,7 @@ servers:
     vanillaWhitelistBypassesNetwork: true
     mirrorNetworkWhitelist: true
     autoRestartHoldTime: "05:00"
+    openConsoleWindow: false
 
   survival:
     startOnJoin: false
@@ -126,6 +127,7 @@ servers:
     vanillaWhitelistBypassesNetwork: false
     mirrorNetworkWhitelist: false
     autoRestartHoldTime: ""
+    openConsoleWindow: false
 
 whitelist:
   enabled: false
@@ -264,6 +266,7 @@ Permissions: `servermanager.moderation.ban`, `.stealthban`, `.ipban`, `.unban`, 
 ## Logging
 - Velocity logs key lifecycle actions: process starts, stop scheduling, cancellations, timeouts, and migration messages.
 - When `logToFile` is enabled, backend stdout/stderr is piped to the configured file and not echoed to the proxy console.
+- macOS only: setting `openConsoleWindow: true` for a server opens a separate Terminal tab tailing that server log while it is running (requires `logToFile: true`).
 
 ## Troubleshooting
 - **Config refuses to load**: Ensure `servers:` contains at least one entry and exactly one has `startOnJoin: true`.

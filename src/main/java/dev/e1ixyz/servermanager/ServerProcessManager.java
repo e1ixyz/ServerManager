@@ -15,6 +15,7 @@ public final class ServerProcessManager {
   private volatile Config cfg;
   private final Logger log;
   private final Path holdFile;
+  private volatile boolean shuttingDown;
 
   public ServerProcessManager(Config cfg, Logger log, Path dataDir) {
     this.cfg = cfg;
@@ -100,9 +101,21 @@ public final class ServerProcessManager {
     return (diff + 999L) / 1000L; // ceiling division to seconds
   }
 
-  public synchronized void start(String name) throws IOException { get(name).start(); }
+  public synchronized void start(String name) throws IOException {
+    if (shuttingDown) {
+      log.info("[{}] start ignored: proxy shutdown in progress.", name);
+      return;
+    }
+    get(name).start();
+  }
   public synchronized void stop(String name) { get(name).stopGracefully(); }
-  public synchronized void stopAllGracefully() { servers.values().forEach(ManagedServer::stopGracefully); }
+  public synchronized void stopAllGracefully() {
+    shuttingDown = true;
+    servers.values().forEach(ManagedServer::stopGracefully);
+  }
+  public synchronized void beginShutdown() {
+    shuttingDown = true;
+  }
   public synchronized boolean sendCommand(String name, String command) {
     return get(name).sendCommand(command);
   }
