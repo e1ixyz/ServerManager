@@ -4,7 +4,8 @@ import org.slf4j.Logger;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.TimeUnit;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 
 final class ManagedServer {
   private final String name;
@@ -14,7 +15,8 @@ final class ManagedServer {
   private volatile Process process;
   private volatile boolean starting;
   private volatile long lastStartMs = 0L;
-  private volatile Long externalConsoleTabId;
+  private volatile String externalConsoleTitle;
+  private volatile File externalConsoleCommandFile;
 
   ManagedServer(String name, ServerConfig cfg, Logger log) {
     this.name = name;
@@ -46,6 +48,7 @@ final class ManagedServer {
       pb.directory(new File(snapshot.workingDir));
       pb.redirectErrorStream(true);
       File logOutputFile = null;
+      File commandSpoolFile = null;
 
       if (Boolean.TRUE.equals(snapshot.logToFile)) {
         File out = (snapshot.logFile != null && !snapshot.logFile.isBlank())
@@ -78,7 +81,9 @@ final class ManagedServer {
       }
 
       if (Boolean.TRUE.equals(snapshot.openConsoleWindow)) {
-        openExternalConsoleWindow(snapshot, started.pid(), logOutputFile);
+        commandSpoolFile = resolveConsoleCommandFile(snapshot, logOutputFile);
+        startExternalConsoleCommandPump(started, commandSpoolFile);
+        openExternalConsoleWindow(snapshot, started.pid(), logOutputFile, commandSpoolFile);
       }
       Thread watcher = new Thread(() -> {
         try {
@@ -150,7 +155,68 @@ final class ManagedServer {
     }
   }
 
-  private synchronized void openExternalConsoleWindow(ServerConfig snapshot, long serverPid, File logOutputFile) {
+  private synchronized File resolveConsoleCommandFile(ServerConfig snapshot, File logOutputFile) {
+    if (!Boolean.TRUE.equals(snapshot.openConsoleWindow)) return null;
+    if (snapshot == null || snapshot.workingDir == null) return null;
+    if (logOutputFile == null) return null;
+    try {
+      File parent = logOutputFile.getParentFile();
+      if (parent == null) parent = new File(snapshot.workingDir);
+      if (!parent.exists()) parent.mkdirs();
+      String token = sanitizeFileToken(name);
+      File commandFile = new File(parent, "proxy-managed-" + token + "-stdin.txt");
+      Files.writeString(
+          commandFile.toPath(),
+          "",
+          StandardCharsets.UTF_8,
+          StandardOpenOption.CREATE,
+          StandardOpenOption.TRUNCATE_EXISTING
+      );
+      return commandFile;
+    } catch (Exception ex) {
+      log.warn("[{}] failed to initialize console command spool", name, ex);
+      return null;
+    }
+  }
+
+  private void startExternalConsoleCommandPump(Process serverProcess, File commandSpoolFile) {
+    if (commandSpoolFile == null) return;
+    this.externalConsoleCommandFile = commandSpoolFile;
+    Thread t = new Thread(() -> {
+      long pointer = 0L;
+      while (serverProcess.isAlive()) {
+        try (RandomAccessFile raf = new RandomAccessFile(commandSpoolFile, "r")) {
+          long length = raf.length();
+          if (pointer > length) pointer = 0L;
+          raf.seek(pointer);
+
+          String raw;
+          while ((raw = raf.readLine()) != null) {
+            String command = decodeRandomAccessLine(raw).trim();
+            if (!command.isEmpty()) {
+              sendCommand(command);
+            }
+          }
+          pointer = raf.getFilePointer();
+        } catch (FileNotFoundException ignored) {
+          pointer = 0L;
+        } catch (Exception ex) {
+          log.debug("[{}] console command bridge read failed", name, ex);
+        }
+        try {
+          Thread.sleep(200L);
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+      }
+    }, "ms-console-cmd-" + name);
+    t.setDaemon(true);
+    t.start();
+  }
+
+  private synchronized void openExternalConsoleWindow(
+      ServerConfig snapshot, long serverPid, File logOutputFile, File commandSpoolFile) {
     closeExternalConsoleWindow();
 
     if (!isMacOs()) {
@@ -169,13 +235,28 @@ final class ManagedServer {
     try {
       String logPath = logOutputFile.getAbsolutePath();
       String title = "SM-" + name.replace("'", "");
+      this.externalConsoleTitle = title;
+      this.externalConsoleCommandFile = commandSpoolFile;
+      String commandPath = commandSpoolFile == null ? null : commandSpoolFile.getAbsolutePath();
+      String commandInit = (commandPath == null)
+          ? ""
+          : ("CMD=" + shQuote(commandPath) + "; touch \"$CMD\"; ");
+      String inputLoop = (commandPath == null)
+          ? "while kill -0 \"$PID\" 2>/dev/null; do sleep 1; done; "
+          : "echo \"[ServerManager] Type backend commands and press Enter.\"; " +
+            "while kill -0 \"$PID\" 2>/dev/null; do " +
+            "if IFS= read -r -t 1 LINE; then " +
+            "printf '%s\\n' \"$LINE\" >> \"$CMD\"; " +
+            "fi; " +
+            "done; ";
       String monitorScript =
           "printf '\\033]0;" + title + "\\007'; " +
               "LOG=" + shQuote(logPath) + "; " +
               "PID=" + serverPid + "; " +
               "touch \"$LOG\"; " +
+              commandInit +
               "tail -n 200 -f \"$LOG\" & TAIL_PID=$!; " +
-              "while kill -0 \"$PID\" 2>/dev/null; do sleep 1; done; " +
+              inputLoop +
               "kill \"$TAIL_PID\" >/dev/null 2>&1; " +
               "wait \"$TAIL_PID\" 2>/dev/null; " +
               "exit";
@@ -184,24 +265,15 @@ final class ManagedServer {
           "tell application \"Terminal\"\n" +
               "activate\n" +
               "set t to do script \"" + escapeAppleScriptString(terminalCommand) + "\"\n" +
-              "delay 0.1\n" +
-              "return id of t\n" +
+              "set custom title of t to \"" + escapeAppleScriptString(title) + "\"\n" +
               "end tell";
 
       Process p = new ProcessBuilder("osascript", "-e", appleScript).start();
-      String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
       String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
       int exit = p.waitFor();
       if (exit != 0) {
         log.warn("[{}] failed to open Terminal console window: {}", name, err.isBlank() ? "osascript failed" : err);
-        return;
-      }
-      if (!out.isBlank()) {
-        try {
-          externalConsoleTabId = Long.parseLong(out);
-        } catch (NumberFormatException ignored) {
-          externalConsoleTabId = null;
-        }
+        externalConsoleTitle = null;
       }
     } catch (Exception ex) {
       log.warn("[{}] failed to open Terminal console window", name, ex);
@@ -209,9 +281,12 @@ final class ManagedServer {
   }
 
   private synchronized void closeExternalConsoleWindow() {
-    Long tabId = externalConsoleTabId;
-    externalConsoleTabId = null;
-    if (tabId == null) return;
+    String title = externalConsoleTitle;
+    externalConsoleTitle = null;
+    File commandFile = externalConsoleCommandFile;
+    externalConsoleCommandFile = null;
+    truncateCommandSpool(commandFile);
+    if (title == null || title.isBlank()) return;
     if (!isMacOs()) return;
 
     try {
@@ -219,15 +294,17 @@ final class ManagedServer {
           "tell application \"Terminal\"\n" +
               "repeat with w in windows\n" +
               "repeat with t in tabs of w\n" +
-              "if id of t is " + tabId + " then\n" +
-              "close t\n" +
-              "return\n" +
+              "if custom title of t is \"" + escapeAppleScriptString(title) + "\" then\n" +
+              "try\n" +
+              "do script \"exit\" in t\n" +
+              "end try\n" +
+              "close t saving no\n" +
               "end if\n" +
               "end repeat\n" +
               "end repeat\n" +
               "end tell";
       Process p = new ProcessBuilder("osascript", "-e", appleScript).start();
-      p.waitFor(2, TimeUnit.SECONDS);
+      p.waitFor();
     } catch (Exception ex) {
       log.debug("[{}] failed to close Terminal console window", name, ex);
     }
@@ -239,6 +316,28 @@ final class ManagedServer {
 
   private static String shQuote(String value) {
     return "'" + value.replace("'", "'\"'\"'") + "'";
+  }
+
+  private static String sanitizeFileToken(String value) {
+    return value == null ? "server" : value.replaceAll("[^A-Za-z0-9._-]", "_");
+  }
+
+  private static String decodeRandomAccessLine(String raw) {
+    return new String(raw.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+  }
+
+  private static void truncateCommandSpool(File commandFile) {
+    if (commandFile == null) return;
+    try {
+      Files.writeString(
+          commandFile.toPath(),
+          "",
+          StandardCharsets.UTF_8,
+          StandardOpenOption.CREATE,
+          StandardOpenOption.TRUNCATE_EXISTING
+      );
+    } catch (Exception ignored) {
+    }
   }
 
   private static String escapeAppleScriptString(String value) {
