@@ -234,7 +234,7 @@ final class ManagedServer {
 
     try {
       String logPath = logOutputFile.getAbsolutePath();
-      String title = "SM-" + name.replace("'", "");
+      String title = "SM-" + sanitizeFileToken(name);
       this.externalConsoleTitle = title;
       this.externalConsoleCommandFile = commandSpoolFile;
       String commandPath = commandSpoolFile == null ? null : commandSpoolFile.getAbsolutePath();
@@ -251,6 +251,7 @@ final class ManagedServer {
             "done; ";
       String monitorScript =
           "printf '\\033]0;" + title + "\\007'; " +
+              "TITLE=" + shQuote(title) + "; " +
               "LOG=" + shQuote(logPath) + "; " +
               "PID=" + serverPid + "; " +
               "touch \"$LOG\"; " +
@@ -259,6 +260,7 @@ final class ManagedServer {
               inputLoop +
               "kill \"$TAIL_PID\" >/dev/null 2>&1; " +
               "wait \"$TAIL_PID\" 2>/dev/null; " +
+              "osascript -e 'tell application \"Terminal\" to close (every tab of every window whose custom title is \"'\"$TITLE\"'\") saving no' >/dev/null 2>&1 || true; " +
               "exit";
       String terminalCommand = "bash -lc " + shQuote(monitorScript);
       String appleScript =
