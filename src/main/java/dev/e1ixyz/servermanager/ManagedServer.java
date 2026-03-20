@@ -15,7 +15,7 @@ final class ManagedServer {
   private volatile Process process;
   private volatile boolean starting;
   private volatile long lastStartMs = 0L;
-  private volatile Long externalConsoleTabId;
+  private volatile Long externalConsoleWindowId;
   private volatile String externalConsoleTty;
   private volatile String externalConsoleTitle;
   private volatile File externalConsoleCommandFile;
@@ -274,22 +274,34 @@ final class ManagedServer {
       String appleScript =
           "tell application \"Terminal\"\n" +
               "activate\n" +
-              "set t to do script \"" + escapeAppleScriptString(terminalCommand) + "\"\n" +
+              "do script \"" + escapeAppleScriptString(terminalCommand) + "\"\n" +
+              "delay 0.2\n" +
+              "set w to front window\n" +
               "try\n" +
-              "set custom title of t to \"" + escapeAppleScriptString(title) + "\"\n" +
+              "set custom title of selected tab of w to \"" + escapeAppleScriptString(title) + "\"\n" +
               "end try\n" +
+              "return id of w as string\n" +
               "end tell";
 
       Process p = new ProcessBuilder("osascript", "-e", appleScript).start();
+      String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
       String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
       int exit = p.waitFor();
       if (exit != 0) {
         log.warn("[{}] failed to open Terminal console window: {}", name, err.isBlank() ? "osascript failed" : err);
         externalConsoleTitle = null;
-        externalConsoleTabId = null;
+        externalConsoleWindowId = null;
         externalConsoleTty = null;
       } else {
-        externalConsoleTabId = null;
+        if (!out.isBlank()) {
+          try {
+            externalConsoleWindowId = Long.parseLong(out);
+          } catch (NumberFormatException ignored) {
+            externalConsoleWindowId = null;
+          }
+        } else {
+          externalConsoleWindowId = null;
+        }
         externalConsoleTty = null;
       }
     } catch (Exception ex) {
@@ -298,8 +310,8 @@ final class ManagedServer {
   }
 
   private synchronized void closeExternalConsoleWindow() {
-    Long tabId = externalConsoleTabId;
-    externalConsoleTabId = null;
+    Long windowId = externalConsoleWindowId;
+    externalConsoleWindowId = null;
     String tty = externalConsoleTty;
     externalConsoleTty = null;
     String title = externalConsoleTitle;
@@ -307,10 +319,27 @@ final class ManagedServer {
     File commandFile = externalConsoleCommandFile;
     externalConsoleCommandFile = null;
     truncateCommandSpool(commandFile);
-    if ((tabId == null) && (tty == null || tty.isBlank()) && (title == null || title.isBlank())) return;
+    if ((windowId == null) && (tty == null || tty.isBlank()) && (title == null || title.isBlank())) return;
     if (!isMacOs()) return;
 
     try {
+      if (windowId != null) {
+        String byWindowScript =
+            "tell application \"Terminal\"\n" +
+                "repeat with w in windows\n" +
+                "if id of w is " + windowId + " then\n" +
+                "close w saving no\n" +
+                "return\n" +
+                "end if\n" +
+                "end repeat\n" +
+                "end tell";
+        Process p = new ProcessBuilder("osascript", "-e", byWindowScript).start();
+        int exit = p.waitFor();
+        if (exit != 0) {
+          String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+          log.warn("[{}] failed to close console window {}: {}", name, windowId, err.isBlank() ? "osascript failed" : err);
+        }
+      }
       if (tty != null && !tty.isBlank()) {
         String byTtyScript =
             "tell application \"Terminal\"\n" +
@@ -328,28 +357,6 @@ final class ManagedServer {
         if (exit != 0) {
           String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
           log.warn("[{}] failed to close console tab by tty {}: {}", name, tty, err.isBlank() ? "osascript failed" : err);
-        }
-      }
-      String byIdScript = null;
-      if (tabId != null) {
-        byIdScript =
-            "tell application \"Terminal\"\n" +
-                "repeat with w in windows\n" +
-                "repeat with t in tabs of w\n" +
-                "if id of t is " + tabId + " then\n" +
-                "close t saving no\n" +
-                "return\n" +
-                "end if\n" +
-                "end repeat\n" +
-                "end repeat\n" +
-                "end tell";
-      }
-      if (byIdScript != null) {
-        Process p = new ProcessBuilder("osascript", "-e", byIdScript).start();
-        int exit = p.waitFor();
-        if (exit != 0) {
-          String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-          log.warn("[{}] failed to close console tab by id {}: {}", name, tabId, err.isBlank() ? "osascript failed" : err);
         }
       }
       if (title == null || title.isBlank()) return;
