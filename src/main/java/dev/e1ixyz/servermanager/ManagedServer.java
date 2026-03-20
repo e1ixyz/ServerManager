@@ -251,6 +251,19 @@ final class ManagedServer {
             "printf '%s\\n' \"$LINE\" >> \"$CMD\"; " +
             "fi; " +
             "done; ";
+      String closeWindowScript =
+          "tell application \"Terminal\"\n" +
+              "repeat with w in windows\n" +
+              "repeat with t in tabs of w\n" +
+              "if custom title of t is \"" + escapeAppleScriptString(title) + "\" then\n" +
+              "try\n" +
+              "close w saving no\n" +
+              "end try\n" +
+              "return\n" +
+              "end if\n" +
+              "end repeat\n" +
+              "end repeat\n" +
+              "end tell";
       String monitorScript =
           "printf '\\033]0;" + title + "\\007'; " +
               "TITLE=" + shQuote(title) + "; " +
@@ -264,11 +277,7 @@ final class ManagedServer {
               inputLoop +
               "kill \"$TAIL_PID\" >/dev/null 2>&1; " +
               "wait \"$TAIL_PID\" 2>/dev/null; " +
-              "if [ -n \"$SELF_TTY\" ]; then " +
-              "osascript -e \"tell application \\\"Terminal\\\" to close (every tab of every window whose tty is \\\"$SELF_TTY\\\") saving no\" >/dev/null 2>&1 || true; " +
-              "osascript -e \"tell application \\\"Terminal\\\" to close (every tab of every window whose tty is \\\"$SELF_TTY_SHORT\\\") saving no\" >/dev/null 2>&1 || true; " +
-              "fi; " +
-              "osascript -e 'tell application \"Terminal\" to close (every tab of every window whose custom title is \"'\"$TITLE\"'\") saving no' >/dev/null 2>&1 || true; " +
+              "nohup sh -c " + shQuote("sleep 1; osascript -e " + shQuote(closeWindowScript) + " >/dev/null 2>&1") + " >/dev/null 2>&1 & " +
               "exit";
       String terminalCommand = "bash -lc " + shQuote(monitorScript);
       String appleScript =
@@ -328,6 +337,15 @@ final class ManagedServer {
             "tell application \"Terminal\"\n" +
                 "repeat with w in windows\n" +
                 "if id of w is " + windowId + " then\n" +
+                "try\n" +
+                "do script \"exit\" in selected tab of w\n" +
+                "end try\n" +
+                "repeat 10 times\n" +
+                "try\n" +
+                "if busy of selected tab of w is false then exit repeat\n" +
+                "end try\n" +
+                "delay 0.2\n" +
+                "end repeat\n" +
                 "close w saving no\n" +
                 "return\n" +
                 "end if\n" +
@@ -346,6 +364,15 @@ final class ManagedServer {
                 "repeat with w in windows\n" +
                 "repeat with t in tabs of w\n" +
                 "if (tty of t as text) is \"" + escapeAppleScriptString(tty) + "\" then\n" +
+                "try\n" +
+                "do script \"exit\" in t\n" +
+                "end try\n" +
+                "repeat 10 times\n" +
+                "try\n" +
+                "if busy of t is false then exit repeat\n" +
+                "end try\n" +
+                "delay 0.2\n" +
+                "end repeat\n" +
                 "close t saving no\n" +
                 "return\n" +
                 "end if\n" +
@@ -368,7 +395,14 @@ final class ManagedServer {
               "try\n" +
               "do script \"exit\" in t\n" +
               "end try\n" +
+              "repeat 10 times\n" +
+              "try\n" +
+              "if busy of t is false then exit repeat\n" +
+              "end try\n" +
+              "delay 0.2\n" +
+              "end repeat\n" +
               "close t saving no\n" +
+              "return\n" +
               "end if\n" +
               "end repeat\n" +
               "end repeat\n" +
