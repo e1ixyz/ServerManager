@@ -279,7 +279,7 @@ final class ManagedServer {
               "wait \"$TAIL_PID\" 2>/dev/null; " +
               "nohup sh -c " + shQuote("sleep 1; osascript -e " + shQuote(closeWindowScript) + " >/dev/null 2>&1") + " >/dev/null 2>&1 & " +
               "exit";
-      String terminalCommand = "bash -lc " + shQuote(monitorScript);
+      String terminalCommand = "exec bash -lc " + shQuote(monitorScript);
       String appleScript =
           "tell application \"Terminal\"\n" +
               "activate\n" +
