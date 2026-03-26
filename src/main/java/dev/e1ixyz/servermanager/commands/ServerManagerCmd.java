@@ -10,12 +10,15 @@ import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
+import com.velocitypowered.api.proxy.server.RegisteredServer;
+import com.velocitypowered.api.scheduler.ScheduledTask;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.slf4j.Logger;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -25,6 +28,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,11 +43,14 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final String[] PERM_START = {"servermanager.command.start", "servermanager.start"};
   private static final String[] PERM_STOP = {"servermanager.command.stop", "servermanager.stop"};
   private static final String[] PERM_HOLD = {"servermanager.command.hold", "servermanager.hold"};
+  private static final String[] PERM_UPDATEPLUGINS = {"servermanager.command.updateplugins", "servermanager.updateplugins"};
   private static final String[] PERM_RELOAD = {"servermanager.command.reload", "servermanager.reload"};
   private static final String[] PERM_WHITELIST = {"servermanager.command.whitelist", "servermanager.whitelist"};
   private static final String[] PERM_HELP = {"servermanager.command.help", "servermanager.help"};
   private static final Pattern DURATION_TOKEN = Pattern.compile("(?i)(\\d+)([dhms]?)");
   private static final long HOLD_FOREVER = Long.MAX_VALUE;
+  private static final int UPDATE_READY_TIMEOUT_SECONDS = 120;
+  private static final int UPDATE_DRAIN_TIMEOUT_SECONDS = 20;
   private static final String WL_USAGE = "<gray>Usage:</gray> <white>/sm whitelist <green>network</green>|<green>vanilla</green> …</white>";
   private static final String WL_NETWORK_USAGE = "<gray>Usage:</gray> <white>/sm whitelist network <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
   private static final String WL_VANILLA_USAGE = "<gray>Usage:</gray> <white>/sm whitelist vanilla <server> <green>list</green>|<green>add</green>|<green>remove</green>|<green>on</green>|<green>off</green>|<green>status</green> …</white>";
@@ -51,17 +58,19 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final SubcommandMeta CMD_START = command("start", PERM_START);
   private static final SubcommandMeta CMD_STOP = command("stop", PERM_STOP);
   private static final SubcommandMeta CMD_HOLD = command("hold", PERM_HOLD);
+  private static final SubcommandMeta CMD_UPDATEPLUGINS = command("updateplugins", PERM_UPDATEPLUGINS);
   private static final SubcommandMeta CMD_RELOAD = command("reload", PERM_RELOAD);
   private static final SubcommandMeta CMD_WHITELIST = command("whitelist", PERM_WHITELIST);
   private static final SubcommandMeta CMD_HELP = command("help", PERM_HELP);
   private static final List<SubcommandMeta> SUBCOMMANDS = List.of(
-      CMD_STATUS, CMD_START, CMD_STOP, CMD_HOLD, CMD_RELOAD, CMD_WHITELIST, CMD_HELP
+      CMD_STATUS, CMD_START, CMD_STOP, CMD_HOLD, CMD_UPDATEPLUGINS, CMD_RELOAD, CMD_WHITELIST, CMD_HELP
   );
   private static final List<HelpEntry> HELP_ENTRIES = List.of(
       help(CMD_STATUS, "<white>/sm status</white> <gray>- View the state of all managed servers.</gray>"),
       help(CMD_START, "<white>/sm start [server]</white> <gray>- Start a managed server manually.</gray>"),
       help(CMD_STOP, "<white>/sm stop [server]</white> <gray>- Stop a running managed server.</gray>"),
       help(CMD_HOLD, "<white>/sm hold [server] [duration|forever|clear]</white> <gray>- Hold a server online or clear the hold.</gray>"),
+      help(CMD_UPDATEPLUGINS, "<white>/sm updateplugins [server] [waiting]</white> <gray>- Move everyone to a waiting server, restart the target backend, then move everyone back.</gray>"),
       help(CMD_RELOAD, "<white>/sm reload</white> <gray>- Reload ServerManager config and listeners.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist network <list|add|remove></white> <gray>- Manage the shared network whitelist.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist vanilla [server] <list|add|remove|on|off|status></white> <gray>- Manage vanilla whitelist settings per backend.</gray>"),
@@ -105,6 +114,19 @@ public final class ServerManagerCmd implements SimpleCommand {
       return command == null || command.canUse(src);
     }
   }
+  private static final class PluginUpdateOperation {
+    final CommandSource source;
+    final String initiatedBy;
+    final String updateServer;
+    final String waitingServer;
+
+    PluginUpdateOperation(CommandSource source, String initiatedBy, String updateServer, String waitingServer) {
+      this.source = source;
+      this.initiatedBy = initiatedBy;
+      this.updateServer = updateServer;
+      this.waitingServer = waitingServer;
+    }
+  }
   private volatile ServerProcessManager mgr;
   private volatile Config cfg;
   private volatile WhitelistService whitelist;
@@ -113,6 +135,8 @@ public final class ServerManagerCmd implements SimpleCommand {
   private final Logger log;
   private final ServerManagerPlugin plugin;
   private final ProxyServer proxy;
+  private final Object updatePluginsLock = new Object();
+  private volatile PluginUpdateOperation activeUpdatePlugins;
 
   public ServerManagerCmd(ServerManagerPlugin plugin, ProxyServer proxy, Logger log) {
     this.plugin = plugin;
@@ -493,6 +517,34 @@ public final class ServerManagerCmd implements SimpleCommand {
         long remaining = manager.holdRemainingSeconds(server);
         src.sendMessage(mmDuration(firstNonBlank(config.messages.holdSet, config.messages.holdStatus), server, playerName, formatDuration(remaining)));
       }
+      case "updateplugins" -> {
+        if (!has(src, PERM_UPDATEPLUGINS)) {
+          src.sendMessage(mm0(config.messages.noPermission));
+          return;
+        }
+        String updateServer = args.length >= 2 ? args[1] : null;
+        String waitingServer = args.length >= 3 ? args[2] : null;
+        if (updateServer == null || waitingServer == null) {
+          src.sendMessage(mmUpdate(firstNonBlank(config.messages.updatePluginsUsage, config.messages.usage),
+              updateServer, waitingServer, nameOf(src), ""));
+          return;
+        }
+        if (!manager.isKnown(updateServer)) {
+          src.sendMessage(mm2(config.messages.unknownServer, updateServer, nameOf(src)));
+          return;
+        }
+        if (!manager.isKnown(waitingServer)) {
+          src.sendMessage(mm2(config.messages.unknownServer, waitingServer, nameOf(src)));
+          return;
+        }
+        if (updateServer.equalsIgnoreCase(waitingServer)) {
+          src.sendMessage(mmUpdate(firstNonBlank(config.messages.updatePluginsSameServer,
+                  "<red><white><server></white> and <white><waiting></white> must be different servers.</red>"),
+              updateServer, waitingServer, nameOf(src), ""));
+          return;
+        }
+        startPluginUpdate(src, updateServer, waitingServer);
+      }
       case "reload" -> {
         if (!has(src, PERM_RELOAD)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
         Config previous = config;
@@ -538,6 +590,7 @@ public final class ServerManagerCmd implements SimpleCommand {
       case "start" -> suggestServers(args[1]);
       case "stop" -> suggestServers(args[1]);
       case "hold" -> suggestHold(args);
+      case "updateplugins" -> suggestUpdatePlugins(args);
       case "whitelist" -> suggestWhitelist(args);
       case "status", "reload", "help" -> List.of();
       default -> List.of();
@@ -590,6 +643,26 @@ public final class ServerManagerCmd implements SimpleCommand {
     if (args.length == 3) {
       List<String> options = new ArrayList<>(HOLD_KEYWORDS);
       options.addAll(HOLD_FOREVER_KEYWORDS);
+      return filterOptions(options, args[2]);
+    }
+    return List.of();
+  }
+
+  private List<String> suggestUpdatePlugins(String[] args) {
+    if (args.length == 2) {
+      return suggestServers(args[1]);
+    }
+    if (args.length == 3) {
+      Config config = this.cfg;
+      if (config == null || config.servers == null || config.servers.isEmpty()) {
+        return List.of();
+      }
+      List<String> options = new ArrayList<>();
+      for (String name : config.servers.keySet()) {
+        if (!name.equalsIgnoreCase(args[1])) {
+          options.add(name);
+        }
+      }
       return filterOptions(options, args[2]);
     }
     return List.of();
@@ -803,6 +876,7 @@ public final class ServerManagerCmd implements SimpleCommand {
     if (s == null) return "";
     return s
         .replace("{server}", "<server>").replace("(server)", "<server>")
+        .replace("{waiting}", "<waiting>").replace("(waiting)", "<waiting>")
         .replace("{player}", "<player>").replace("(player)", "<player>")
         .replace("{state}", "<state>").replace("(state)", "<state>")
         .replace("{duration}", "<duration>").replace("(duration)", "<duration>")
@@ -833,6 +907,14 @@ public final class ServerManagerCmd implements SimpleCommand {
         Placeholder.unparsed("duration", duration == null ? "" : duration));
   }
 
+  private static Component mmUpdate(String template, String server, String waiting, String player, String reason) {
+    return MINI.deserialize(normalize(template),
+        Placeholder.unparsed("server", server == null ? "" : server),
+        Placeholder.unparsed("waiting", waiting == null ? "" : waiting),
+        Placeholder.unparsed("player", player == null ? "" : player),
+        Placeholder.unparsed("reason", reason == null ? "" : reason));
+  }
+
   private void disconnectPlayersOn(String server, Component message) {
     if (server == null || message == null) return;
     proxy.getAllPlayers().forEach(p -> p.getCurrentServer().ifPresent(cs -> {
@@ -840,6 +922,259 @@ public final class ServerManagerCmd implements SimpleCommand {
         p.disconnect(message);
       }
     }));
+  }
+
+  private void startPluginUpdate(CommandSource src, String updateServer, String waitingServer) {
+    PluginUpdateOperation op = new PluginUpdateOperation(src, nameOf(src), updateServer, waitingServer);
+    synchronized (updatePluginsLock) {
+      if (activeUpdatePlugins != null) {
+        Config config = this.cfg;
+        String template = (config != null && config.messages != null)
+            ? firstNonBlank(config.messages.updatePluginsBusy,
+            "<yellow>Another plugin update workflow is already running.</yellow>")
+            : "<yellow>Another plugin update workflow is already running.</yellow>";
+        src.sendMessage(mmUpdate(template, updateServer, waitingServer, op.initiatedBy, ""));
+        return;
+      }
+      activeUpdatePlugins = op;
+    }
+
+    Config config = this.cfg;
+    String preparing = (config != null && config.messages != null)
+        ? firstNonBlank(config.messages.updatePluginsPreparing,
+        "<yellow>Starting <white><waiting></white> before restarting <white><server></white>...</yellow>")
+        : "<yellow>Starting <white><waiting></white> before restarting <white><server></white>...</yellow>";
+    src.sendMessage(mmUpdate(preparing, updateServer, waitingServer, op.initiatedBy, ""));
+    ensureServerReady(op, waitingServer, this::onWaitingServerReady);
+  }
+
+  private void onWaitingServerReady(PluginUpdateOperation op) {
+    if (!isActiveUpdate(op)) return;
+    Config config = this.cfg;
+    String moving = (config != null && config.messages != null)
+        ? firstNonBlank(config.messages.updatePluginsMoving,
+        "<yellow><white><waiting></white> is ready. Moving all players before restarting <white><server></white>...</yellow>")
+        : "<yellow><white><waiting></white> is ready. Moving all players before restarting <white><server></white>...</yellow>";
+    op.source.sendMessage(mmUpdate(moving, op.updateServer, op.waitingServer, op.initiatedBy, ""));
+    moveAllPlayersToServer(op, op.waitingServer, config != null && config.messages != null
+        ? config.messages.updatePluginsPlayerWaiting
+        : "<yellow>Plugin updates are in progress. Sending you to <white><waiting></white>...</yellow>");
+    waitForServerToDrain(op, op.updateServer, this::restartUpdateServer);
+  }
+
+  private void restartUpdateServer(PluginUpdateOperation op) {
+    if (!isActiveUpdate(op)) return;
+    Config config = this.cfg;
+    String restarting = (config != null && config.messages != null)
+        ? firstNonBlank(config.messages.updatePluginsRestarting,
+        "<yellow>Restarting <white><server></white> now...</yellow>")
+        : "<yellow>Restarting <white><server></white> now...</yellow>";
+    op.source.sendMessage(mmUpdate(restarting, op.updateServer, op.waitingServer, op.initiatedBy, ""));
+
+    proxy.getScheduler().buildTask(plugin, () -> {
+      if (!isActiveUpdate(op)) return;
+      ServerProcessManager manager = this.mgr;
+      if (manager == null || !manager.isKnown(op.updateServer)) {
+        failPluginUpdate(op, "update server is no longer configured", null);
+        return;
+      }
+      try {
+        if (manager.isRunning(op.updateServer)) {
+          manager.stop(op.updateServer);
+        }
+      } catch (Exception ex) {
+        failPluginUpdate(op, "failed to stop " + op.updateServer, ex);
+        return;
+      }
+      try {
+        manager.start(op.updateServer);
+      } catch (IOException ex) {
+        failPluginUpdate(op, "failed to start " + op.updateServer, ex);
+        return;
+      }
+      ensureServerReady(op, op.updateServer, this::finishPluginUpdate);
+    }).schedule();
+  }
+
+  private void finishPluginUpdate(PluginUpdateOperation op) {
+    if (!isActiveUpdate(op)) return;
+    Config config = this.cfg;
+    String returning = (config != null && config.messages != null)
+        ? firstNonBlank(config.messages.updatePluginsReturning,
+        "<green><white><server></white> is back online. Sending players there now...</green>")
+        : "<green><white><server></white> is back online. Sending players there now...</green>";
+    op.source.sendMessage(mmUpdate(returning, op.updateServer, op.waitingServer, op.initiatedBy, ""));
+    moveAllPlayersToServer(op, op.updateServer, config != null && config.messages != null
+        ? config.messages.updatePluginsPlayerReturning
+        : "<green>Plugin updates finished. Sending you to <white><server></white>...</green>");
+    String complete = (config != null && config.messages != null)
+        ? firstNonBlank(config.messages.updatePluginsComplete,
+        "<green>Plugin update flow complete. Players were returned to <white><server></white>.</green>")
+        : "<green>Plugin update flow complete. Players were returned to <white><server></white>.</green>";
+    op.source.sendMessage(mmUpdate(complete, op.updateServer, op.waitingServer, op.initiatedBy, ""));
+    clearActiveUpdate(op);
+  }
+
+  private void ensureServerReady(PluginUpdateOperation op, String serverName,
+                                 java.util.function.Consumer<PluginUpdateOperation> onReady) {
+    if (!isActiveUpdate(op)) return;
+    ServerProcessManager manager = this.mgr;
+    if (manager == null || !manager.isKnown(serverName)) {
+      failPluginUpdate(op, serverName + " is no longer configured", null);
+      return;
+    }
+    try {
+      if (!manager.isRunning(serverName)) {
+        manager.start(serverName);
+      }
+    } catch (IOException ex) {
+      failPluginUpdate(op, "failed to start " + serverName, ex);
+      return;
+    }
+
+    Optional<RegisteredServer> target = proxy.getServer(serverName);
+    if (target.isEmpty()) {
+      failPluginUpdate(op, "Velocity does not know server " + serverName, null);
+      return;
+    }
+
+    AtomicBoolean resolved = new AtomicBoolean(false);
+    final ScheduledTask[] poller = new ScheduledTask[1];
+    long deadline = System.currentTimeMillis() + UPDATE_READY_TIMEOUT_SECONDS * 1000L;
+    poller[0] = proxy.getScheduler().buildTask(plugin, () -> {
+      if (!isActiveUpdate(op)) {
+        ScheduledTask task = poller[0];
+        if (task != null) task.cancel();
+        return;
+      }
+      ServerProcessManager currentManager = this.mgr;
+      if (currentManager == null || !currentManager.isKnown(serverName)) {
+        if (resolved.compareAndSet(false, true)) {
+          ScheduledTask task = poller[0];
+          if (task != null) task.cancel();
+          failPluginUpdate(op, serverName + " is no longer configured", null);
+        }
+        return;
+      }
+      if (System.currentTimeMillis() >= deadline) {
+        if (resolved.compareAndSet(false, true)) {
+          ScheduledTask task = poller[0];
+          if (task != null) task.cancel();
+          failPluginUpdate(op, serverName + " did not come up in time", null);
+        }
+        return;
+      }
+      if (!currentManager.isRunning(serverName)) {
+        return;
+      }
+      target.get().ping().whenComplete((ping, err) -> {
+        if (err != null || !resolved.compareAndSet(false, true)) return;
+        ScheduledTask task = poller[0];
+        if (task != null) task.cancel();
+        proxy.getScheduler().buildTask(plugin, () -> onReady.accept(op)).schedule();
+      });
+    }).delay(Duration.ZERO).repeat(Duration.ofSeconds(1)).schedule();
+  }
+
+  private void moveAllPlayersToServer(PluginUpdateOperation op, String targetServer, String playerTemplate) {
+    if (!isActiveUpdate(op)) return;
+    Optional<RegisteredServer> target = proxy.getServer(targetServer);
+    if (target.isEmpty()) {
+      failPluginUpdate(op, "Velocity does not know server " + targetServer, null);
+      return;
+    }
+    Component notice = null;
+    if (playerTemplate != null && !playerTemplate.isBlank()) {
+      notice = mmUpdate(playerTemplate, op.updateServer, op.waitingServer, op.initiatedBy, "");
+    }
+    for (Player player : proxy.getAllPlayers()) {
+      if (notice != null) {
+        player.sendMessage(notice);
+      }
+      String current = player.getCurrentServer()
+          .map(cs -> cs.getServerInfo().getName())
+          .orElse(null);
+      if (targetServer.equalsIgnoreCase(current)) {
+        continue;
+      }
+      player.createConnectionRequest(target.get()).connect();
+    }
+  }
+
+  private void waitForServerToDrain(PluginUpdateOperation op, String serverName,
+                                    java.util.function.Consumer<PluginUpdateOperation> onDrain) {
+    if (!isActiveUpdate(op)) return;
+    if (countPlayersOnServer(serverName) == 0) {
+      onDrain.accept(op);
+      return;
+    }
+
+    AtomicBoolean resolved = new AtomicBoolean(false);
+    final ScheduledTask[] poller = new ScheduledTask[1];
+    long deadline = System.currentTimeMillis() + UPDATE_DRAIN_TIMEOUT_SECONDS * 1000L;
+    poller[0] = proxy.getScheduler().buildTask(plugin, () -> {
+      if (!isActiveUpdate(op)) {
+        ScheduledTask task = poller[0];
+        if (task != null) task.cancel();
+        return;
+      }
+      int playersRemaining = countPlayersOnServer(serverName);
+      if (playersRemaining <= 0) {
+        if (resolved.compareAndSet(false, true)) {
+          ScheduledTask task = poller[0];
+          if (task != null) task.cancel();
+          onDrain.accept(op);
+        }
+        return;
+      }
+      if (System.currentTimeMillis() >= deadline && resolved.compareAndSet(false, true)) {
+        ScheduledTask task = poller[0];
+        if (task != null) task.cancel();
+        log.warn("[{}] {} player(s) still remained on the backend after waiting {}s; continuing plugin update flow.",
+            serverName, playersRemaining, UPDATE_DRAIN_TIMEOUT_SECONDS);
+        onDrain.accept(op);
+      }
+    }).delay(Duration.ofSeconds(1)).repeat(Duration.ofSeconds(1)).schedule();
+  }
+
+  private int countPlayersOnServer(String serverName) {
+    int count = 0;
+    for (Player player : proxy.getAllPlayers()) {
+      boolean onTarget = player.getCurrentServer()
+          .map(cs -> cs.getServerInfo().getName().equals(serverName))
+          .orElse(false);
+      if (onTarget) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private boolean isActiveUpdate(PluginUpdateOperation op) {
+    return activeUpdatePlugins == op;
+  }
+
+  private void clearActiveUpdate(PluginUpdateOperation op) {
+    synchronized (updatePluginsLock) {
+      if (activeUpdatePlugins == op) {
+        activeUpdatePlugins = null;
+      }
+    }
+  }
+
+  private void failPluginUpdate(PluginUpdateOperation op, String reason, Throwable error) {
+    if (error != null) {
+      log.error("Plugin update workflow failed for {} -> {}", op.updateServer, op.waitingServer, error);
+    } else {
+      log.warn("Plugin update workflow failed for {} -> {}: {}", op.updateServer, op.waitingServer, reason);
+    }
+    if (!isActiveUpdate(op)) return;
+    Config config = this.cfg;
+    String template = (config != null && config.messages != null)
+        ? firstNonBlank(config.messages.updatePluginsFailed, "<red>Plugin update flow failed: <reason></red>")
+        : "<red>Plugin update flow failed: <reason></red>";
+    op.source.sendMessage(mmUpdate(template, op.updateServer, op.waitingServer, op.initiatedBy, firstNonBlank(reason, "unknown error")));
+    clearActiveUpdate(op);
   }
 
   private static long parseDurationSeconds(String raw) {

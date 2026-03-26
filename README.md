@@ -11,6 +11,7 @@ Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist beha
 - Three-state MOTD (offline/starting/online) driven by MiniMessage templates, including a distinct "starting" banner.
 - Graceful per-server shutdowns when a backend empties, plus a safety stop-all when the entire proxy is empty with optional startup grace.
 - Admin hold command (`/sm hold`) keeps a backend online for a set window even when it is empty.
+- Admin `/sm updateplugins` workflow starts a waiting server, moves everyone there, restarts the target backend, then returns everyone once it is ping-ready again.
 - Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
 - Optional macOS per-server Terminal tabs (`openConsoleWindow`) for live backend logs plus command input forwarding.
 - Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve web onboarding.
@@ -52,9 +53,11 @@ Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist beha
 ## Configuration
 Default file snippets (generated on first run) are shown below. All MiniMessage strings support the standard placeholder set:
 - `<server>` resolves to the backend name.
+- `<waiting>` resolves to the temporary waiting backend used by `/sm updateplugins`.
 - `<player>` resolves to the player username (where applicable).
 - `<state>` is available for status messages.
 - `<duration>` is used by hold notifications to display the remaining pin time.
+- `<reason>` is available for moderation and workflow failure messages.
 
 ```yaml
 kickMessage: "Server Starting"
@@ -71,9 +74,20 @@ motd:
 
 messages:
   noPermission:   "<red>You don't have permission.</red>"
-  usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>"
+  usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green>|<green>updateplugins</green> ...</white>"
   helpHeader:     "<gray>ServerManager commands:</gray>"
   holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|forever|clear></green></white>"
+  updatePluginsUsage: "<gray>Usage:</gray> <white>/sm updateplugins <green><server></green> <green><waiting></green></white>"
+  updatePluginsBusy: "<yellow>Another plugin update workflow is already running.</yellow>"
+  updatePluginsPreparing: "<yellow>Starting <white><waiting></white> before restarting <white><server></white>...</yellow>"
+  updatePluginsMoving: "<yellow><white><waiting></white> is ready. Moving all players before restarting <white><server></white>...</yellow>"
+  updatePluginsRestarting: "<yellow>Restarting <white><server></white> now...</yellow>"
+  updatePluginsReturning: "<green><white><server></white> is back online. Sending players there now...</green>"
+  updatePluginsComplete: "<green>Plugin update flow complete. Players were returned to <white><server></white>.</green>"
+  updatePluginsFailed: "<red>Plugin update flow failed: <reason></red>"
+  updatePluginsSameServer: "<red><white><server></white> and <white><waiting></white> must be different servers.</red>"
+  updatePluginsPlayerWaiting: "<yellow>Plugin updates are in progress. Sending you to <white><waiting></white>...</yellow>"
+  updatePluginsPlayerReturning: "<green>Plugin updates finished. Sending you to <white><server></white>...</green>"
   holdSet:        "<green><white><server></white> will stay online for the next <duration>.</green>"
   holdStatus:     "<gray><white><server></white> hold remaining: <duration>.</gray>"
   holdCleared:    "<yellow>Hold cleared for <white><server></white>.</yellow>"
@@ -243,10 +257,13 @@ Root command aliases: `/servermanager`, `/sm`
 | `stop`     | `servermanager.command.stop`                | Sends the graceful stop command to the backend. |
 | `help`     | `servermanager.command.help`                | Prints the command overview along with `hold` syntax. |
 | `hold`     | `servermanager.command.hold`                | Keeps the backend running for the requested duration (accepts `30m`, `2h`, `1h30m`, or `forever`). Starts the server automatically if it is offline. |
+| `updateplugins` | `servermanager.command.updateplugins`  | Starts a waiting backend, moves all online players there, restarts the target backend, and returns everyone once the target is ready again. |
 | `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
 | `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`, and toggles vanilla whitelist enforcement per server. |
 
 Durations default to minutes when no unit is supplied. Use `forever` for an indefinite hold. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early. When a server is held forever and `autoRestartHoldTime` is set (HH:mm), it will automatically restart at that daily time with in-game warnings at 1 minute and 5 seconds.
+
+`/sm updateplugins <server> <waiting>` is intended for coordinated plugin updates. ServerManager ensures `<waiting>` is online first, moves all connected players across the proxy to it, restarts `<server>`, then moves all connected players back once `<server>` answers ping again.
 
 \* Any of `servermanager.command.*`, `servermanager.*`, or legacy `startonjoin.*` nodes also satisfy the checks. Console sources bypass permission checks automatically.
 

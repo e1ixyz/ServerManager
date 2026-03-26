@@ -41,9 +41,20 @@ public final class Config {
     public String timeout        = "<red><white><server></white> didn’t come up in time.</red>";
     public String unknownServer  = "<red>Unknown server <white><server></white>.</red>";
     public String noPermission   = "<red>You don’t have permission.</red>";
-    public String usage          = "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>";
+    public String usage          = "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green>|<green>updateplugins</green> ...</white>";
     public String helpHeader     = "<gray>ServerManager commands:</gray>";
     public String holdUsage      = "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|forever|clear></green></white>";
+    public String updatePluginsUsage = "<gray>Usage:</gray> <white>/sm updateplugins <green><server></green> <green><waiting></green></white>";
+    public String updatePluginsBusy = "<yellow>Another plugin update workflow is already running.</yellow>";
+    public String updatePluginsPreparing = "<yellow>Starting <white><waiting></white> before restarting <white><server></white>...</yellow>";
+    public String updatePluginsMoving = "<yellow><white><waiting></white> is ready. Moving all players before restarting <white><server></white>...</yellow>";
+    public String updatePluginsRestarting = "<yellow>Restarting <white><server></white> now...</yellow>";
+    public String updatePluginsReturning = "<green><white><server></white> is back online. Sending players there now...</green>";
+    public String updatePluginsComplete = "<green>Plugin update flow complete. Players were returned to <white><server></white>.</green>";
+    public String updatePluginsFailed = "<red>Plugin update flow failed: <reason></red>";
+    public String updatePluginsSameServer = "<red><white><server></white> and <white><waiting></white> must be different servers.</red>";
+    public String updatePluginsPlayerWaiting = "<yellow>Plugin updates are in progress. Sending you to <white><waiting></white>...</yellow>";
+    public String updatePluginsPlayerReturning = "<green>Plugin updates finished. Sending you to <white><server></white>...</green>";
     public String holdSet        = "<green><white><server></white> will stay online for the next <duration>.</green>";
     public String holdStatus     = "<gray><white><server></white> hold remaining: <duration>.</gray>";
     public String holdCleared    = "<yellow>Hold cleared for <white><server></white>.</yellow>";
@@ -155,9 +166,20 @@ public final class Config {
           timeout:        "<red><white><server></white> didn't come up in time.</red>"
           unknownServer:  "<red>Unknown server <white><server></white>.</red>"
           noPermission:   "<red>You don't have permission.</red>"
-          usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green> [server] [duration]</white>"
+          usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green>|<green>updateplugins</green> ...</white>"
           helpHeader:     "<gray>ServerManager commands:</gray>"
           holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|forever|clear></green></white>"
+          updatePluginsUsage: "<gray>Usage:</gray> <white>/sm updateplugins <green><server></green> <green><waiting></green></white>"
+          updatePluginsBusy: "<yellow>Another plugin update workflow is already running.</yellow>"
+          updatePluginsPreparing: "<yellow>Starting <white><waiting></white> before restarting <white><server></white>...</yellow>"
+          updatePluginsMoving: "<yellow><white><waiting></white> is ready. Moving all players before restarting <white><server></white>...</yellow>"
+          updatePluginsRestarting: "<yellow>Restarting <white><server></white> now...</yellow>"
+          updatePluginsReturning: "<green><white><server></white> is back online. Sending players there now...</green>"
+          updatePluginsComplete: "<green>Plugin update flow complete. Players were returned to <white><server></white>.</green>"
+          updatePluginsFailed: "<red>Plugin update flow failed: <reason></red>"
+          updatePluginsSameServer: "<red><white><server></white> and <white><waiting></white> must be different servers.</red>"
+          updatePluginsPlayerWaiting: "<yellow>Plugin updates are in progress. Sending you to <white><waiting></white>...</yellow>"
+          updatePluginsPlayerReturning: "<green>Plugin updates finished. Sending you to <white><server></white>...</green>"
           holdSet:        "<green><white><server></white> will stay online for the next <duration>.</green>"
           holdStatus:     "<gray><white><server></white> hold remaining: <duration>.</gray>"
           holdCleared:    "<yellow>Hold cleared for <white><server></white>.</yellow>"
