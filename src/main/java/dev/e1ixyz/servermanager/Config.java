@@ -24,6 +24,7 @@ public final class Config {
   public Whitelist whitelist = new Whitelist();
   public Moderation moderation = new Moderation();
   public AutoIpBan autoIpBan = new AutoIpBan();
+  public Compatibility compatibility = new Compatibility();
 
   public static final class Motd {
     public String offline  = "<gray>Your Network</gray> <gray>- <white><server></white></gray>";
@@ -146,6 +147,14 @@ public final class Config {
     public int windowSeconds = 0;
   }
 
+  public static final class Compatibility {
+    public ServerBridgeCompatibility serverBridge = new ServerBridgeCompatibility();
+  }
+
+  public static final class ServerBridgeCompatibility {
+    public boolean enabled = false;
+  }
+
   public static Config loadOrCreateDefault(Path path, Logger log) throws Exception {
     if (!Files.exists(path)) {
       final String defaultYaml = """
@@ -264,6 +273,9 @@ public final class Config {
             connections: { limit: 10, windowSeconds: 10 }
             pings:       { limit: 15, windowSeconds: 10 }
             badUsernames:{ limit: 5,  windowSeconds: 60 }
+        compatibility:
+          serverBridge:
+            enabled: false
         forcedHosts: {}
         """;
       Files.createDirectories(path.getParent());
@@ -304,6 +316,8 @@ public final class Config {
     if (cfg.autoIpBan.thresholds.connections == null) cfg.autoIpBan.thresholds.connections = new Threshold();
     if (cfg.autoIpBan.thresholds.pings == null) cfg.autoIpBan.thresholds.pings = new Threshold();
     if (cfg.autoIpBan.thresholds.badUsernames == null) cfg.autoIpBan.thresholds.badUsernames = new Threshold();
+    if (cfg.compatibility == null) cfg.compatibility = new Compatibility();
+    if (cfg.compatibility.serverBridge == null) cfg.compatibility.serverBridge = new ServerBridgeCompatibility();
     if (cfg.forcedHosts == null) cfg.forcedHosts = new LinkedHashMap<>();
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;

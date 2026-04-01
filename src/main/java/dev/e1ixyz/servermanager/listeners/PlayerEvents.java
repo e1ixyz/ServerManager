@@ -1,6 +1,7 @@
 package dev.e1ixyz.servermanager.listeners;
 
 import dev.e1ixyz.servermanager.Config;
+import dev.e1ixyz.servermanager.ServerManagerPlugin;
 import dev.e1ixyz.servermanager.ServerProcessManager;
 import dev.e1ixyz.servermanager.moderation.AutoIpBanService;
 import dev.e1ixyz.servermanager.moderation.ModerationService;
@@ -34,6 +35,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ThreadLocalRandom;
@@ -52,7 +54,7 @@ public final class PlayerEvents {
   private static final int START_CONNECT_TIMEOUT_SECONDS = 90;
   private static final java.time.format.DateTimeFormatter HHMM = java.time.format.DateTimeFormatter.ofPattern("H:mm");
 
-  private final Object pluginOwner;
+  private final ServerManagerPlugin pluginOwner;
   private final ProxyServer proxy;
   private final Config cfg;
   private final ServerProcessManager mgr;
@@ -81,6 +83,10 @@ public final class PlayerEvents {
   private final Set<UUID> readyNotifyOnce = ConcurrentHashMap.newKeySet();
   /** Last backend each player successfully reached (for disconnect scheduling). */
   private final Map<UUID, String> lastKnownServer = new ConcurrentHashMap<>();
+  /** Futures waiting for a backend to become ping-ready. */
+  private final Map<String, Deque<CompletableFuture<Boolean>>> readyWaiters = new ConcurrentHashMap<>();
+  /** Player-scoped actions that should run after the player lands on a specific backend. */
+  private final Map<UUID, Map<String, Deque<QueuedArrivalTask>>> queuedArrivalTasks = new ConcurrentHashMap<>();
 
   /** Lightweight readiness cache: true only after a successful ping. */
   private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
@@ -108,8 +114,18 @@ public final class PlayerEvents {
     }
   }
 
+  private static final class QueuedArrivalTask {
+    final Runnable action;
+    final CompletableFuture<Boolean> future;
+
+    private QueuedArrivalTask(Runnable action, CompletableFuture<Boolean> future) {
+      this.action = action;
+      this.future = future;
+    }
+  }
+
   public PlayerEvents(
-      Object pluginOwner,
+      ServerManagerPlugin pluginOwner,
       ProxyServer proxy,
       Config cfg,
       ServerProcessManager mgr,
@@ -182,7 +198,7 @@ public final class PlayerEvents {
       for (String name : cfg.servers.keySet()) {
         refreshHoldRestart(name);
         if (!mgr.isRunning(name)) {
-          isReadyCache.put(name, Boolean.FALSE);
+          updateReadiness(name, false);
           clearDeferredBackendCommands(name);
           if (mgr.isHoldActive(name)) {
             long now = System.currentTimeMillis();
@@ -199,17 +215,11 @@ public final class PlayerEvents {
           }
           continue;
         }
-        // Assume not ready until a ping succeeds
-        isReadyCache.put(name, Boolean.FALSE);
         if (countPlayersOn(name) == 0 && !mgr.isHoldActive(name)) {
           scheduleStopIfServerEmpty(name);
         }
         proxy.getServer(name).ifPresent(rs -> rs.ping().whenComplete((ok, err) -> {
-          boolean ready = err == null;
-          isReadyCache.put(name, ready);
-          if (ready) {
-            flushDeferredBackendCommands(name);
-          }
+          updateReadiness(name, err == null);
         }));
       }
     }).delay(Duration.ofSeconds(1)).repeat(Duration.ofSeconds(2)).schedule();
@@ -274,6 +284,7 @@ public final class PlayerEvents {
     cancelPendingStopAll(); // activity on proxy
     Player joining = e.getPlayer();
     cancelPendingConnect(joining.getUniqueId()); // clear any previous wait
+    failAllQueuedArrivals(joining.getUniqueId());
 
     if (moderation != null && moderation.enabled()) {
       var ban = moderation.findBan(joining.getUniqueId(), remoteIp(joining));
@@ -355,6 +366,7 @@ public final class PlayerEvents {
     if (!mgr.isKnown(target)) return; // only manage servers present in our config
 
     if (isBanned(player, true)) {
+      failQueuedArrivals(player.getUniqueId(), target);
       event.setResult(ServerPreConnectEvent.ServerResult.denied());
       return;
     }
@@ -372,6 +384,7 @@ public final class PlayerEvents {
     if (isPrimary) {
       if (!hasNetworkAccess(player)) {
         handleNotWhitelisted(player, true);
+        failQueuedArrivals(player.getUniqueId(), target);
         event.setResult(ServerPreConnectEvent.ServerResult.denied());
         return;
       }
@@ -380,6 +393,7 @@ public final class PlayerEvents {
           && vanillaWhitelist.tracksServer(target)
           && vanillaWhitelist.isWhitelistEnabled(target)
           && !vanillaWhitelist.isWhitelisted(target, player.getUniqueId(), player.getUsername())) {
+        failQueuedArrivals(player.getUniqueId(), target);
         event.setResult(ServerPreConnectEvent.ServerResult.denied());
         player.sendMessage(mm(cfg.messages.notWhitelistedBackend, target, player.getUsername()));
         return;
@@ -420,6 +434,7 @@ public final class PlayerEvents {
       }
       if (waiting != null && !waiting.equals(target)) { // switching queue target
         cancelPendingConnect(id);
+        failQueuedArrivals(id, waiting);
       }
 
       try {
@@ -455,6 +470,10 @@ public final class PlayerEvents {
     String joined = e.getServer().getServerInfo().getName();
     cancelPendingServerStop(joined);
     lastKnownServer.put(e.getPlayer().getUniqueId(), joined);
+    if (mgr.isKnown(joined)) {
+      pluginOwner.firePlayerDelivered(e.getPlayer().getUniqueId(), joined);
+      runQueuedArrivals(e.getPlayer().getUniqueId(), joined);
+    }
 
     // If they switched from another backend, maybe that one is now empty -> schedule stop for it
     e.getPreviousServer().ifPresent(prev -> {
@@ -467,6 +486,7 @@ public final class PlayerEvents {
   public void onDisconnect(DisconnectEvent e) {
     UUID id = e.getPlayer().getUniqueId();
     cancelPendingConnect(id); // if waiting, stop the poller
+    failAllQueuedArrivals(id);
 
     // If they were on a backend, maybe that backend is now empty
     e.getPlayer().getCurrentServer().ifPresent(conn -> {
@@ -509,7 +529,7 @@ public final class PlayerEvents {
       try {
         log.info("[{}] stopping (empty for {}s)...", serverName, delay);
         mgr.stop(serverName);
-        isReadyCache.put(serverName, Boolean.FALSE);
+        updateReadiness(serverName, false);
       } catch (Exception ex) {
         log.error("Failed to stop server {}", serverName, ex);
       }
@@ -557,7 +577,7 @@ public final class PlayerEvents {
           if (!mgr.isRunning(name)) continue;
           try {
             mgr.stop(name);
-            isReadyCache.put(name, Boolean.FALSE);
+            updateReadiness(name, false);
           } catch (Exception ex) {
             log.error("Failed to stop server {} during proxy-empty sweep", name, ex);
           }
@@ -658,7 +678,7 @@ public final class PlayerEvents {
       try {
         log.info("[{}] auto-restart triggered (indefinite hold). Stopping...", serverName);
         mgr.stop(serverName);
-        isReadyCache.put(serverName, Boolean.FALSE);
+        updateReadiness(serverName, false);
       } catch (Exception ex) {
         log.error("Failed to stop {} during auto-restart", serverName, ex);
       }
@@ -742,6 +762,7 @@ public final class PlayerEvents {
       if ((System.currentTimeMillis() - start) > START_CONNECT_TIMEOUT_SECONDS * 1000L) {
         cancelPendingConnect(id);
         player.sendMessage(mm(cfg.messages.timeout, serverName, player.getUsername()));
+        failQueuedArrivals(id, serverName);
         // Enforce "no backend without players" if nobody reached it
         if (countPlayersOn(serverName) == 0 && mgr.isRunning(serverName)) {
           if (mgr.isHoldActive(serverName)) {
@@ -751,7 +772,7 @@ public final class PlayerEvents {
           try {
             log.info("[{}] auto-send timeout; no players joined -> stopping.", serverName);
             mgr.stop(serverName);
-            isReadyCache.put(serverName, Boolean.FALSE);
+            updateReadiness(serverName, false);
           } catch (Exception ex) {
             log.error("Failed to stop server {} after timeout", serverName, ex);
           }
@@ -763,14 +784,17 @@ public final class PlayerEvents {
       if (opt.isEmpty()) {
         cancelPendingConnect(id);
         player.sendMessage(mm(cfg.messages.unknownServer, serverName, player.getUsername()));
+        failQueuedArrivals(id, serverName);
         return;
       }
 
       var rs = opt.get();
       rs.ping().whenComplete((ping, err) -> {
-        if (err != null) return; // still not ready
-        isReadyCache.put(serverName, Boolean.TRUE);
-        flushDeferredBackendCommands(serverName);
+        if (err != null) {
+          updateReadiness(serverName, false);
+          return; // still not ready
+        }
+        updateReadiness(serverName, true);
 
         if (!serverName.equals(waitingTarget.get(id))) return;
         if (!readyNotifyOnce.add(id)) return; // already fired once for this wait
@@ -787,7 +811,7 @@ public final class PlayerEvents {
         proxy.getScheduler().buildTask(pluginOwner, () -> {
           player.sendMessage(mm(cfg.messages.readySending, serverName, player.getUsername()));
           cancelPendingServerStop(serverName); // ensure no pending empty-stop fights us
-          player.createConnectionRequest(rs).connect();
+          attemptManagedConnect(player, rs, serverName);
         }).schedule();
       });
     }).delay(Duration.ofSeconds(1)).repeat(Duration.ofSeconds(1)).schedule();
@@ -815,6 +839,112 @@ public final class PlayerEvents {
 
   private boolean isReady(String serverName) {
     return Boolean.TRUE.equals(isReadyCache.get(serverName));
+  }
+
+  public boolean isServerReady(String serverName) {
+    return isReady(serverName);
+  }
+
+  public CompletableFuture<Boolean> ensureServerReady(String serverName) {
+    String normalized = sanitizeServerName(serverName);
+    if (normalized == null || !mgr.isKnown(normalized) || proxy.getServer(normalized).isEmpty()) {
+      return CompletableFuture.completedFuture(Boolean.FALSE);
+    }
+    if (isReady(normalized)) {
+      return CompletableFuture.completedFuture(Boolean.TRUE);
+    }
+
+    CompletableFuture<Boolean> future = enqueueReadyWaiter(normalized);
+    if (!mgr.isRunning(normalized)) {
+      try {
+        mgr.start(normalized);
+      } catch (IOException ex) {
+        log.error("Failed to start server {}", normalized, ex);
+        completeReadyWaiters(normalized, false);
+      }
+    }
+
+    proxy.getServer(normalized).ifPresent(rs -> rs.ping().whenComplete((ping, err) -> {
+      if (err == null) {
+        updateReadiness(normalized, true);
+      }
+    }));
+    return future;
+  }
+
+  public CompletableFuture<Boolean> connectPlayerWhenReady(Player player, String serverName, Runnable afterConnect) {
+    String normalized = sanitizeServerName(serverName);
+    if (player == null || normalized == null || !mgr.isKnown(normalized)) {
+      return CompletableFuture.completedFuture(Boolean.FALSE);
+    }
+
+    Player livePlayer = proxy.getPlayer(player.getUniqueId()).orElse(null);
+    RegisteredServer registeredServer = proxy.getServer(normalized).orElse(null);
+    if (livePlayer == null || registeredServer == null) {
+      return CompletableFuture.completedFuture(Boolean.FALSE);
+    }
+
+    String currentServer = livePlayer.getCurrentServer()
+        .map(connection -> connection.getServerInfo().getName())
+        .orElse(null);
+    if (currentServer != null && currentServer.equalsIgnoreCase(normalized)) {
+      return runArrivalActionNow(afterConnect);
+    }
+
+    UUID playerId = livePlayer.getUniqueId();
+    String waiting = waitingTarget.get(playerId);
+    if (waiting != null && !waiting.equalsIgnoreCase(normalized)) {
+      cancelPendingConnect(playerId);
+      failQueuedArrivals(playerId, waiting);
+    }
+
+    CompletableFuture<Boolean> future = enqueueQueuedArrival(playerId, normalized, afterConnect);
+    cancelPendingServerStop(normalized);
+
+    if (isReady(normalized)) {
+      cancelPendingConnect(playerId);
+      attemptManagedConnect(livePlayer, registeredServer, normalized);
+      return future;
+    }
+
+    boolean alreadyWaiting = normalized.equalsIgnoreCase(waitingTarget.get(playerId));
+    if (!mgr.isRunning(normalized)) {
+      try {
+        mgr.start(normalized);
+      } catch (IOException ex) {
+        log.error("Failed to start server {}", normalized, ex);
+        livePlayer.sendMessage(mm(cfg.messages.startFailed, normalized, livePlayer.getUsername()));
+        failQueuedArrivals(playerId, normalized);
+        return future;
+      }
+    }
+
+    if (!alreadyWaiting) {
+      livePlayer.sendMessage(mm(cfg.messages.startingQueued, normalized, livePlayer.getUsername()));
+      queueAutoSend(livePlayer, normalized);
+    }
+    return future;
+  }
+
+  public CompletableFuture<Boolean> queuePlayerActionAfterConnect(UUID playerUuid, String serverName, Runnable action) {
+    String normalized = sanitizeServerName(serverName);
+    if (playerUuid == null || normalized == null || action == null || !mgr.isKnown(normalized)) {
+      return CompletableFuture.completedFuture(Boolean.FALSE);
+    }
+
+    Player player = proxy.getPlayer(playerUuid).orElse(null);
+    if (player == null) {
+      return CompletableFuture.completedFuture(Boolean.FALSE);
+    }
+
+    String currentServer = player.getCurrentServer()
+        .map(connection -> connection.getServerInfo().getName())
+        .orElse(null);
+    if (currentServer != null && currentServer.equalsIgnoreCase(normalized)) {
+      return runArrivalActionNow(action);
+    }
+
+    return enqueueQueuedArrival(playerUuid, normalized, action);
   }
 
   private boolean hasNetworkAccess(Player player) {
@@ -936,6 +1066,184 @@ public final class PlayerEvents {
     log.info("[{}] deferred console command until backend is ready: {}", server, normalized);
   }
 
+  private void updateReadiness(String serverName, boolean ready) {
+    Boolean previous = isReadyCache.put(serverName, ready);
+    boolean wasReady = Boolean.TRUE.equals(previous);
+    if (!ready) {
+      return;
+    }
+
+    flushDeferredBackendCommands(serverName);
+    completeReadyWaiters(serverName, true);
+    if (!wasReady) {
+      pluginOwner.fireServerReady(serverName);
+    }
+  }
+
+  private CompletableFuture<Boolean> enqueueReadyWaiter(String serverName) {
+    CompletableFuture<Boolean> future = new CompletableFuture<>();
+    String key = normalizeServerKey(serverName);
+    Deque<CompletableFuture<Boolean>> waiters =
+        readyWaiters.computeIfAbsent(key, ignored -> new ConcurrentLinkedDeque<>());
+    waiters.offerLast(future);
+
+    ScheduledTask timeoutTask = proxy.getScheduler().buildTask(pluginOwner, () -> {
+      if (removeReadyWaiter(key, future)) {
+        future.complete(Boolean.FALSE);
+      }
+    }).delay(Duration.ofSeconds(START_CONNECT_TIMEOUT_SECONDS)).schedule();
+
+    future.whenComplete((result, error) -> timeoutTask.cancel());
+    return future;
+  }
+
+  private boolean removeReadyWaiter(String serverKey, CompletableFuture<Boolean> future) {
+    Deque<CompletableFuture<Boolean>> waiters = readyWaiters.get(serverKey);
+    if (waiters == null) {
+      return false;
+    }
+    boolean removed = waiters.remove(future);
+    if (waiters.isEmpty()) {
+      readyWaiters.remove(serverKey, waiters);
+    }
+    return removed;
+  }
+
+  private void completeReadyWaiters(String serverName, boolean value) {
+    Deque<CompletableFuture<Boolean>> waiters = readyWaiters.remove(normalizeServerKey(serverName));
+    if (waiters == null) {
+      return;
+    }
+    CompletableFuture<Boolean> future;
+    while ((future = waiters.pollFirst()) != null) {
+      future.complete(value);
+    }
+  }
+
+  private CompletableFuture<Boolean> enqueueQueuedArrival(UUID playerUuid, String serverName, Runnable action) {
+    CompletableFuture<Boolean> future = new CompletableFuture<>();
+    String key = normalizeServerKey(serverName);
+    QueuedArrivalTask task = new QueuedArrivalTask(action == null ? () -> {} : action, future);
+    Map<String, Deque<QueuedArrivalTask>> byServer =
+        queuedArrivalTasks.computeIfAbsent(playerUuid, ignored -> new ConcurrentHashMap<>());
+    Deque<QueuedArrivalTask> tasks = byServer.computeIfAbsent(key, ignored -> new ConcurrentLinkedDeque<>());
+    tasks.offerLast(task);
+
+    ScheduledTask timeoutTask = proxy.getScheduler().buildTask(pluginOwner, () -> {
+      if (removeQueuedArrival(playerUuid, key, task)) {
+        future.complete(Boolean.FALSE);
+      }
+    }).delay(Duration.ofSeconds(START_CONNECT_TIMEOUT_SECONDS)).schedule();
+
+    future.whenComplete((result, error) -> timeoutTask.cancel());
+    return future;
+  }
+
+  private boolean removeQueuedArrival(UUID playerUuid, String serverKey, QueuedArrivalTask task) {
+    Map<String, Deque<QueuedArrivalTask>> byServer = queuedArrivalTasks.get(playerUuid);
+    if (byServer == null) {
+      return false;
+    }
+    Deque<QueuedArrivalTask> tasks = byServer.get(serverKey);
+    if (tasks == null) {
+      return false;
+    }
+    boolean removed = tasks.remove(task);
+    if (tasks.isEmpty()) {
+      byServer.remove(serverKey, tasks);
+    }
+    if (byServer.isEmpty()) {
+      queuedArrivalTasks.remove(playerUuid, byServer);
+    }
+    return removed;
+  }
+
+  private Deque<QueuedArrivalTask> takeQueuedArrivals(UUID playerUuid, String serverName) {
+    Map<String, Deque<QueuedArrivalTask>> byServer = queuedArrivalTasks.get(playerUuid);
+    if (byServer == null) {
+      return null;
+    }
+    Deque<QueuedArrivalTask> tasks = byServer.remove(normalizeServerKey(serverName));
+    if (byServer.isEmpty()) {
+      queuedArrivalTasks.remove(playerUuid, byServer);
+    }
+    return tasks;
+  }
+
+  private void runQueuedArrivals(UUID playerUuid, String serverName) {
+    Deque<QueuedArrivalTask> tasks = takeQueuedArrivals(playerUuid, serverName);
+    if (tasks == null || tasks.isEmpty()) {
+      return;
+    }
+    QueuedArrivalTask task;
+    while ((task = tasks.pollFirst()) != null) {
+      try {
+        task.action.run();
+        task.future.complete(Boolean.TRUE);
+      } catch (Exception ex) {
+        log.warn("Post-connect action failed for {} on {}", playerUuid, serverName, ex);
+        task.future.complete(Boolean.FALSE);
+      }
+    }
+  }
+
+  private void failQueuedArrivals(UUID playerUuid, String serverName) {
+    Deque<QueuedArrivalTask> tasks = takeQueuedArrivals(playerUuid, serverName);
+    if (tasks == null) {
+      return;
+    }
+    QueuedArrivalTask task;
+    while ((task = tasks.pollFirst()) != null) {
+      task.future.complete(Boolean.FALSE);
+    }
+  }
+
+  private void failAllQueuedArrivals(UUID playerUuid) {
+    Map<String, Deque<QueuedArrivalTask>> byServer = queuedArrivalTasks.remove(playerUuid);
+    if (byServer == null) {
+      return;
+    }
+    for (Deque<QueuedArrivalTask> tasks : byServer.values()) {
+      QueuedArrivalTask task;
+      while ((task = tasks.pollFirst()) != null) {
+        task.future.complete(Boolean.FALSE);
+      }
+    }
+  }
+
+  private CompletableFuture<Boolean> runArrivalActionNow(Runnable action) {
+    CompletableFuture<Boolean> future = new CompletableFuture<>();
+    proxy.getScheduler().buildTask(pluginOwner, () -> {
+      try {
+        if (action != null) {
+          action.run();
+        }
+        future.complete(Boolean.TRUE);
+      } catch (Exception ex) {
+        log.warn("Immediate post-connect action failed", ex);
+        future.complete(Boolean.FALSE);
+      }
+    }).schedule();
+    return future;
+  }
+
+  private void attemptManagedConnect(Player player, RegisteredServer targetServer, String serverName) {
+    UUID playerUuid = player.getUniqueId();
+    player.createConnectionRequest(targetServer).connect().whenComplete((result, error) -> {
+      if (error != null) {
+        failQueuedArrivals(playerUuid, serverName);
+        player.sendMessage(Component.text("Failed to connect to " + serverName + "."));
+        log.warn("Managed connect failed for {} -> {}", player.getUsername(), serverName, error);
+        return;
+      }
+      if (result == null || result.isSuccessful()) {
+        return;
+      }
+      failQueuedArrivals(playerUuid, serverName);
+      result.getReasonComponent().ifPresent(player::sendMessage);
+    });
+  }
+
   private void flushDeferredBackendCommands(String server) {
     Deque<String> queue = deferredBackendCommands.get(server);
     if (queue == null || queue.isEmpty()) return;
@@ -961,6 +1269,11 @@ public final class PlayerEvents {
 
   private void clearDeferredBackendCommands(String server) {
     deferredBackendCommands.remove(server);
+  }
+
+  private String normalizeServerKey(String serverName) {
+    String normalized = sanitizeServerName(serverName);
+    return normalized == null ? "" : normalized.toLowerCase(Locale.ROOT);
   }
 
   private String resolveKickMessage(Config.ForcedHost hostCfg) {
@@ -1160,6 +1473,8 @@ public final class PlayerEvents {
     pendingConnectStartMs.clear();
     waitingTarget.clear();
     readyNotifyOnce.clear();
+    completeAllReadyWaiters(false);
+    clearAllQueuedArrivals();
     lastKnownServer.clear();
     holdRestartTasks.values().forEach(rs -> {
       if (rs.warn1m != null) rs.warn1m.cancel();
@@ -1170,5 +1485,24 @@ public final class PlayerEvents {
     holdRestartInProgress.clear();
     deferredBackendCommands.clear();
     heartbeatTask.cancel();
+  }
+
+  private void completeAllReadyWaiters(boolean value) {
+    for (Map.Entry<String, Deque<CompletableFuture<Boolean>>> entry : readyWaiters.entrySet()) {
+      Deque<CompletableFuture<Boolean>> waiters = readyWaiters.remove(entry.getKey());
+      if (waiters == null) {
+        continue;
+      }
+      CompletableFuture<Boolean> future;
+      while ((future = waiters.pollFirst()) != null) {
+        future.complete(value);
+      }
+    }
+  }
+
+  private void clearAllQueuedArrivals() {
+    for (UUID playerUuid : queuedArrivalTasks.keySet()) {
+      failAllQueuedArrivals(playerUuid);
+    }
   }
 }

@@ -2,9 +2,11 @@
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/listeners/PlayerEvents.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/moderation/AutoIpBanService.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/whitelist/WhitelistHttpServer.java
+/Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/ManagedServerState.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/whitelist/VanillaWhitelistChecker.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/ServerProcessManager.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/commands/ModerationCommands.java
+/Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/ManagedLifecycleListener.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/whitelist/WhitelistService.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/commands/StatusCmd.java
 /Users/elimcgehee/Desktop/INDEV/MC/ServerManager/src/main/java/dev/e1ixyz/servermanager/commands/StartCmd.java

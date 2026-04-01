@@ -11,13 +11,20 @@ import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.plugin.Plugin;
+import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import org.slf4j.Logger;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import dev.e1ixyz.servermanager.commands.ModerationCommands;
 
 @Plugin(
@@ -41,6 +48,7 @@ public final class ServerManagerPlugin {
   private ServerManagerCmd rootCommand;
   private ModerationService moderation;
   private ModerationCommands moderationCommands;
+  private final Set<ManagedLifecycleListener> lifecycleListeners = ConcurrentHashMap.newKeySet();
 
   @Inject
   public ServerManagerPlugin(ProxyServer proxy, Logger logger, @com.velocitypowered.api.plugin.annotation.DataDirectory Path dataDir) {
@@ -181,6 +189,140 @@ public final class ServerManagerPlugin {
         logger.warn("Failed to dispatch '{}' to {}", command, server);
       }
     }
+  }
+
+  public boolean isServerBridgeCompatibilityEnabled() {
+    return config != null
+        && config.compatibility != null
+        && config.compatibility.serverBridge != null
+        && config.compatibility.serverBridge.enabled;
+  }
+
+  public CompletableFuture<Boolean> ensureServerReady(String server) {
+    if (!isServerBridgeCompatibilityEnabled() || playerEvents == null) {
+      return CompletableFuture.completedFuture(Boolean.FALSE);
+    }
+    return playerEvents.ensureServerReady(server);
+  }
+
+  public CompletableFuture<Boolean> connectPlayerWhenReady(Player player, String server) {
+    return connectPlayerWhenReady(player, server, null);
+  }
+
+  public CompletableFuture<Boolean> connectPlayerWhenReady(Player player, String server, Runnable afterConnect) {
+    if (!isServerBridgeCompatibilityEnabled() || playerEvents == null) {
+      return CompletableFuture.completedFuture(Boolean.FALSE);
+    }
+    return playerEvents.connectPlayerWhenReady(player, server, afterConnect);
+  }
+
+  public CompletableFuture<Boolean> queuePlayerActionAfterConnect(UUID playerUuid, String server, Runnable action) {
+    if (!isServerBridgeCompatibilityEnabled() || playerEvents == null) {
+      return CompletableFuture.completedFuture(Boolean.FALSE);
+    }
+    return playerEvents.queuePlayerActionAfterConnect(playerUuid, server, action);
+  }
+
+  public ManagedServerState getManagedServerState(String server) {
+    if (server == null || config == null || processManager == null) {
+      return null;
+    }
+    ServerConfig serverCfg = config.servers == null ? null : config.servers.get(server);
+    if (serverCfg == null) {
+      return null;
+    }
+
+    Path workingDir = resolveManagedServerWorkingDirectories().get(server);
+    boolean running = processManager.isRunning(server);
+    boolean ready = playerEvents != null && playerEvents.isServerReady(server);
+    boolean holdActive = processManager.isHoldActive(server);
+    long holdRemainingSeconds = processManager.holdRemainingSeconds(server);
+    boolean primary = server.equals(config.primaryServerName());
+    boolean startOnJoin = Boolean.TRUE.equals(serverCfg.startOnJoin);
+
+    return new ManagedServerState(
+        server,
+        workingDir,
+        running,
+        ready,
+        holdActive,
+        holdRemainingSeconds,
+        primary,
+        startOnJoin
+    );
+  }
+
+  public Map<String, ManagedServerState> getManagedServerStates() {
+    if (config == null || config.servers == null || config.servers.isEmpty()) {
+      return Collections.emptyMap();
+    }
+    Map<String, ManagedServerState> states = new LinkedHashMap<>();
+    for (String server : config.servers.keySet()) {
+      ManagedServerState state = getManagedServerState(server);
+      if (state != null) {
+        states.put(server, state);
+      }
+    }
+    return states;
+  }
+
+  public void registerLifecycleListener(ManagedLifecycleListener listener) {
+    if (listener != null) {
+      lifecycleListeners.add(listener);
+    }
+  }
+
+  public void unregisterLifecycleListener(ManagedLifecycleListener listener) {
+    if (listener != null) {
+      lifecycleListeners.remove(listener);
+    }
+  }
+
+  public void fireServerReady(String server) {
+    for (ManagedLifecycleListener listener : lifecycleListeners) {
+      try {
+        listener.onServerReady(server);
+      } catch (Exception ex) {
+        logger.warn("ManagedLifecycleListener threw during onServerReady for {}", server, ex);
+      }
+    }
+  }
+
+  public void firePlayerDelivered(UUID playerUuid, String server) {
+    for (ManagedLifecycleListener listener : lifecycleListeners) {
+      try {
+        listener.onPlayerDelivered(playerUuid, server);
+      } catch (Exception ex) {
+        logger.warn("ManagedLifecycleListener threw during onPlayerDelivered for {}", playerUuid, ex);
+      }
+    }
+  }
+
+  public synchronized Map<String, Path> resolveManagedServerWorkingDirectories() {
+    Map<String, Path> resolved = new LinkedHashMap<>();
+    if (config == null || config.servers == null || config.servers.isEmpty()) {
+      return resolved;
+    }
+
+    Path proxyRoot = dataDir.getParent() != null && dataDir.getParent().getParent() != null
+        ? dataDir.getParent().getParent().toAbsolutePath().normalize()
+        : Path.of("").toAbsolutePath().normalize();
+    for (Map.Entry<String, ServerConfig> entry : config.servers.entrySet()) {
+      String name = entry.getKey();
+      ServerConfig serverCfg = entry.getValue();
+      if (name == null || name.isBlank() || serverCfg == null || serverCfg.workingDir == null || serverCfg.workingDir.isBlank()) {
+        continue;
+      }
+
+      Path workingDir = Path.of(serverCfg.workingDir);
+      if (!workingDir.isAbsolute()) {
+        workingDir = proxyRoot.resolve(workingDir).normalize();
+      } else {
+        workingDir = workingDir.normalize();
+      }
+      resolved.put(name, workingDir);
+    }
+    return resolved;
   }
 
   private void registerModerationCommands() {

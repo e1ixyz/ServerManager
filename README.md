@@ -20,6 +20,7 @@ Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist beha
 - Optional daily auto-restart time for servers held indefinitely, with 1-minute and 5-second warnings broadcast in-game.
 - Proxy shutdown now blocks all new managed starts, preventing hold auto-restart races during shutdown.
 - Whitelist console sync commands are deferred until a backend is ping-ready, preventing startup-phase console errors.
+- Optional compatibility mode for companion plugins such as `ServerBridge`, exposing explicit readiness, delivery, and post-connect action APIs.
 
 ## Requirements
 - Java 17+ for the Velocity proxy runtime
@@ -177,6 +178,10 @@ autoIpBan:
     badUsernames:{ limit: 5,  windowSeconds: 60 }
 
 forcedHosts: {}
+
+compatibility:
+  serverBridge:
+    enabled: false
 ```
 
 Key points:
@@ -193,6 +198,32 @@ Key points:
 - `allowVanillaBypass: true` remains the default for the primary backend when the per-server flag is not set. Set it to `false` if you want even the primary server to ignore its vanilla whitelist entirely.
 - `moderation:` controls the proxy-level moderation registry used by the standalone `/ban`, `/stealthban`, `/ipban`, `/mute`, `/warn`, and list commands. When enabled (default) bans are enforced at login, before any backend starts.
 - `autoIpBan:` enables lightweight rate-based IP bans for ping/login spam; set `dryRun: true` to log-only first and add trusted IPs for your proxy/CDN.
+- `compatibility.serverBridge.enabled: true` turns on the explicit companion-plugin API used by `ServerBridge`. Leave it `false` if you want `ServerManager` to behave as a standalone start-on-demand plugin only.
+
+## ServerBridge Compatibility
+
+When `compatibility.serverBridge.enabled` is enabled, `ServerManager` exposes an in-process API for external plugins running on the same Velocity proxy.
+
+Current compatibility surface:
+
+- `resolveManagedServerWorkingDirectories()`
+- `getManagedServerState(server)`
+- `getManagedServerStates()`
+- `ensureServerReady(server)`
+- `connectPlayerWhenReady(player, server)`
+- `connectPlayerWhenReady(player, server, afterConnect)`
+- `queuePlayerActionAfterConnect(playerUuid, server, action)`
+- `registerLifecycleListener(...)`
+- `unregisterLifecycleListener(...)`
+
+This is what lets `ServerBridge` handle a remote EssentialsX `/home` on an offline SMP:
+
+1. `ServerBridge` resolves which managed backend owns the home.
+2. It calls `connectPlayerWhenReady(...)`.
+3. `ServerManager` starts the backend if it is offline, waits until the ping succeeds, and sends the player there.
+4. After delivery, `ServerManager` runs the queued post-connect action so `ServerBridge` can execute the normal backend EssentialsX command.
+
+If compatibility mode is disabled, the core `/server <name>` startup and auto-send behavior still works exactly as before. Companion plugins just do not get the stronger explicit lifecycle hooks.
 
 ## Network Whitelist Flow
 1. Player joins Velocity.
