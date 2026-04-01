@@ -10,6 +10,7 @@ import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.player.PlayerChatEvent;
+import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.event.player.ServerPreConnectEvent;
 import com.velocitypowered.api.event.proxy.ProxyPingEvent;
@@ -320,16 +321,39 @@ public final class PlayerEvents {
     player.sendMessage(msg);
   }
 
+  @Subscribe
+  public void onChooseInitialServer(PlayerChooseInitialServerEvent event) {
+    String forcedTarget = resolveManagedForcedHostTarget(event.getPlayer());
+    if (forcedTarget == null) return;
+
+    proxy.getServer(forcedTarget).ifPresentOrElse(event::setInitialServer, () ->
+        log.warn("Forced-host target {} is managed but not registered with Velocity.", forcedTarget));
+  }
+
   // -------------- Gate all connects (/server <target>, menu join, etc.) --------------
   @Subscribe
   public void onServerPreConnect(ServerPreConnectEvent event) {
     RegisteredServer original = event.getOriginalServer();
     RegisteredServer effective = event.getResult().getServer().orElse(original);
     String target = (effective != null) ? effective.getServerInfo().getName() : null;
+    Player player = event.getPlayer();
+    if (event.getPreviousServer() == null) {
+      String forcedTarget = resolveManagedForcedHostTarget(player);
+      if (forcedTarget != null && !forcedTarget.equals(target)) {
+        var forcedServer = proxy.getServer(forcedTarget);
+        if (forcedServer.isPresent()) {
+          effective = forcedServer.get();
+          target = forcedTarget;
+          event.setResult(ServerPreConnectEvent.ServerResult.allowed(effective));
+        } else {
+          log.warn("Forced-host target {} is managed but not registered with Velocity.", forcedTarget);
+        }
+      }
+    }
+
     if (target == null) return;
     if (!mgr.isKnown(target)) return; // only manage servers present in our config
 
-    Player player = event.getPlayer();
     if (isBanned(player, true)) {
       event.setResult(ServerPreConnectEvent.ServerResult.denied());
       return;
@@ -944,6 +968,18 @@ public final class PlayerEvents {
       return hostCfg.kickMessage;
     }
     return cfg.kickMessage;
+  }
+
+  private String resolveManagedForcedHostTarget(Player player) {
+    if (player == null) return null;
+    Config.ForcedHost hostCfg = player.getVirtualHost()
+        .map(addr -> forcedHostOverrides.get(normalizeHost(addr.getHostString())))
+        .orElse(null);
+    if (hostCfg == null) return null;
+
+    String target = sanitizeServerName(hostCfg.server);
+    if (target == null || !mgr.isKnown(target)) return null;
+    return target;
   }
 
   private String resolveTrackedServer(Config.ForcedHost hostCfg, String normalizedHost) {
