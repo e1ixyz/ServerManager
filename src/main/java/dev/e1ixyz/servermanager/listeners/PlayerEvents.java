@@ -52,6 +52,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class PlayerEvents {
   /** How long to wait for a started backend before timing out auto-send (seconds). */
   private static final int START_CONNECT_TIMEOUT_SECONDS = 90;
+  private static final int MANAGED_CONNECT_RETRY_ATTEMPTS = 5;
   private static final java.time.format.DateTimeFormatter HHMM = java.time.format.DateTimeFormatter.ofPattern("H:mm");
 
   private final ServerManagerPlugin pluginOwner;
@@ -811,7 +812,7 @@ public final class PlayerEvents {
         proxy.getScheduler().buildTask(pluginOwner, () -> {
           player.sendMessage(mm(cfg.messages.readySending, serverName, player.getUsername()));
           cancelPendingServerStop(serverName); // ensure no pending empty-stop fights us
-          attemptManagedConnect(player, rs, serverName);
+          attemptManagedConnect(player, rs, serverName, 0);
         }).schedule();
       });
     }).delay(Duration.ofSeconds(1)).repeat(Duration.ofSeconds(1)).schedule();
@@ -903,7 +904,7 @@ public final class PlayerEvents {
 
     if (isReady(normalized)) {
       cancelPendingConnect(playerId);
-      attemptManagedConnect(livePlayer, registeredServer, normalized);
+      attemptManagedConnect(livePlayer, registeredServer, normalized, 0);
       return future;
     }
 
@@ -1227,10 +1228,18 @@ public final class PlayerEvents {
     return future;
   }
 
-  private void attemptManagedConnect(Player player, RegisteredServer targetServer, String serverName) {
+  private void attemptManagedConnect(Player player, RegisteredServer targetServer, String serverName, int attempt) {
     UUID playerUuid = player.getUniqueId();
     player.createConnectionRequest(targetServer).connect().whenComplete((result, error) -> {
+      if (proxy.getPlayer(playerUuid).isEmpty()) {
+        failQueuedArrivals(playerUuid, serverName);
+        return;
+      }
       if (error != null) {
+        if (attempt < MANAGED_CONNECT_RETRY_ATTEMPTS) {
+          retryManagedConnect(playerUuid, serverName, attempt + 1);
+          return;
+        }
         failQueuedArrivals(playerUuid, serverName);
         player.sendMessage(Component.text("Failed to connect to " + serverName + "."));
         log.warn("Managed connect failed for {} -> {}", player.getUsername(), serverName, error);
@@ -1239,9 +1248,38 @@ public final class PlayerEvents {
       if (result == null || result.isSuccessful()) {
         return;
       }
+      if (result.getStatus() == com.velocitypowered.api.proxy.ConnectionRequestBuilder.Status.SERVER_DISCONNECTED
+          && attempt < MANAGED_CONNECT_RETRY_ATTEMPTS) {
+        retryManagedConnect(playerUuid, serverName, attempt + 1);
+        return;
+      }
       failQueuedArrivals(playerUuid, serverName);
       result.getReasonComponent().ifPresent(player::sendMessage);
     });
+  }
+
+  private void retryManagedConnect(UUID playerUuid, String serverName, int nextAttempt) {
+    proxy.getScheduler().buildTask(pluginOwner, () -> {
+      if (!hasQueuedArrivals(playerUuid, serverName)) {
+        return;
+      }
+      Player player = proxy.getPlayer(playerUuid).orElse(null);
+      RegisteredServer targetServer = proxy.getServer(serverName).orElse(null);
+      if (player == null || targetServer == null) {
+        failQueuedArrivals(playerUuid, serverName);
+        return;
+      }
+      attemptManagedConnect(player, targetServer, serverName, nextAttempt);
+    }).delay(Duration.ofSeconds(2)).schedule();
+  }
+
+  private boolean hasQueuedArrivals(UUID playerUuid, String serverName) {
+    Map<String, Deque<QueuedArrivalTask>> byServer = queuedArrivalTasks.get(playerUuid);
+    if (byServer == null) {
+      return false;
+    }
+    Deque<QueuedArrivalTask> tasks = byServer.get(normalizeServerKey(serverName));
+    return tasks != null && !tasks.isEmpty();
   }
 
   private void flushDeferredBackendCommands(String server) {

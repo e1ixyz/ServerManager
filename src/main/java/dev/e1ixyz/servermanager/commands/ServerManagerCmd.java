@@ -51,6 +51,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final long HOLD_FOREVER = Long.MAX_VALUE;
   private static final int UPDATE_READY_TIMEOUT_SECONDS = 120;
   private static final int UPDATE_DRAIN_TIMEOUT_SECONDS = 20;
+  private static final int UPDATE_TRANSFER_RETRY_ATTEMPTS = 5;
   private static final String WL_USAGE = "<gray>Usage:</gray> <white>/sm whitelist <green>network</green>|<green>vanilla</green> …</white>";
   private static final String WL_NETWORK_USAGE = "<gray>Usage:</gray> <white>/sm whitelist network <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
   private static final String WL_VANILLA_USAGE = "<gray>Usage:</gray> <white>/sm whitelist vanilla <server> <green>list</green>|<green>add</green>|<green>remove</green>|<green>on</green>|<green>off</green>|<green>status</green> …</white>";
@@ -1097,8 +1098,49 @@ public final class ServerManagerCmd implements SimpleCommand {
       if (targetServer.equalsIgnoreCase(current)) {
         continue;
       }
-      player.createConnectionRequest(target.get()).connect();
+      attemptUpdatePlayerTransfer(op, player.getUniqueId(), target.get(), targetServer, 0);
     }
+  }
+
+  private void attemptUpdatePlayerTransfer(PluginUpdateOperation op, UUID playerUuid,
+                                           RegisteredServer targetServer, String targetName, int attempt) {
+    if (!isActiveUpdate(op)) return;
+    Player player = proxy.getPlayer(playerUuid).orElse(null);
+    if (player == null) {
+      return;
+    }
+
+    player.createConnectionRequest(targetServer).connect().whenComplete((result, error) -> {
+      if (!isActiveUpdate(op) || proxy.getPlayer(playerUuid).isEmpty()) {
+        return;
+      }
+      if (error != null) {
+        if (attempt < UPDATE_TRANSFER_RETRY_ATTEMPTS) {
+          retryUpdatePlayerTransfer(op, playerUuid, targetName, attempt + 1);
+          return;
+        }
+        log.warn("Failed to move {} to {} during plugin update flow", player.getUsername(), targetName, error);
+        return;
+      }
+      if (result == null || result.isSuccessful()) {
+        return;
+      }
+      if (result.getStatus() == com.velocitypowered.api.proxy.ConnectionRequestBuilder.Status.SERVER_DISCONNECTED
+          && attempt < UPDATE_TRANSFER_RETRY_ATTEMPTS) {
+        retryUpdatePlayerTransfer(op, playerUuid, targetName, attempt + 1);
+      }
+    });
+  }
+
+  private void retryUpdatePlayerTransfer(PluginUpdateOperation op, UUID playerUuid, String targetName, int nextAttempt) {
+    proxy.getScheduler().buildTask(plugin, () -> {
+      if (!isActiveUpdate(op)) return;
+      RegisteredServer target = proxy.getServer(targetName).orElse(null);
+      if (target == null) {
+        return;
+      }
+      attemptUpdatePlayerTransfer(op, playerUuid, target, targetName, nextAttempt);
+    }).delay(Duration.ofSeconds(2)).schedule();
   }
 
   private void waitForServerToDrain(PluginUpdateOperation op, String serverName,
