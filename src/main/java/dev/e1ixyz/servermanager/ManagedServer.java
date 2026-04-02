@@ -373,7 +373,7 @@ final class ManagedServer {
                 "end try\n" +
                 "delay 0.2\n" +
                 "end repeat\n" +
-                "close t saving no\n" +
+                "close w saving no\n" +
                 "return\n" +
                 "end if\n" +
                 "end repeat\n" +
@@ -383,7 +383,7 @@ final class ManagedServer {
         int exit = p.waitFor();
         if (exit != 0) {
           String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-          log.warn("[{}] failed to close console tab by tty {}: {}", name, tty, err.isBlank() ? "osascript failed" : err);
+          log.warn("[{}] failed to close console window by tty {}: {}", name, tty, err.isBlank() ? "osascript failed" : err);
         }
       }
       if (title == null || title.isBlank()) return;
@@ -401,7 +401,7 @@ final class ManagedServer {
               "end try\n" +
               "delay 0.2\n" +
               "end repeat\n" +
-              "close t saving no\n" +
+              "close w saving no\n" +
               "return\n" +
               "end if\n" +
               "end repeat\n" +
@@ -411,7 +411,7 @@ final class ManagedServer {
       int exit = p.waitFor();
       if (exit != 0) {
         String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-        log.warn("[{}] failed to close console tab by title '{}': {}", name, title, err.isBlank() ? "osascript failed" : err);
+        log.warn("[{}] failed to close console window by title '{}': {}", name, title, err.isBlank() ? "osascript failed" : err);
       }
     } catch (Exception ex) {
       log.debug("[{}] failed to close Terminal console window", name, ex);
