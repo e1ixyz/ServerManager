@@ -86,6 +86,8 @@ public final class PlayerEvents {
   private final Map<UUID, String> lastKnownServer = new ConcurrentHashMap<>();
   /** Short-lived reconnect target after leaving or disconnecting from the proxy. */
   private final Map<UUID, RecentDisconnect> recentDisconnectServer = new ConcurrentHashMap<>();
+  /** Short-lived target for managed backend switches that may disconnect before ServerConnectedEvent fires. */
+  private final Map<UUID, RecentDisconnect> recentConnectIntent = new ConcurrentHashMap<>();
   /** Futures waiting for a backend to become ping-ready. */
   private final Map<String, Deque<CompletableFuture<Boolean>>> readyWaiters = new ConcurrentHashMap<>();
   /** Player-scoped actions that should run after the player lands on a specific backend. */
@@ -136,6 +138,8 @@ public final class PlayerEvents {
       this.future = future;
     }
   }
+
+  private static final long CONNECT_INTENT_GRACE_MS = 15_000L;
 
   public PlayerEvents(
       ServerManagerPlugin pluginOwner,
@@ -417,6 +421,14 @@ public final class PlayerEvents {
       }
     }
 
+    String currentManaged = player.getCurrentServer()
+        .map(conn -> conn.getServerInfo().getName())
+        .filter(mgr::isKnown)
+        .orElse(null);
+    if (currentManaged != null && !currentManaged.equals(target)) {
+      rememberRecentConnectIntent(player.getUniqueId(), target);
+    }
+
     // Any managed server (including primary when not first-join):
     // If offline, start it, deny immediate connect, message the player, and queue auto-send.
     if (!running || startingState) {
@@ -488,6 +500,7 @@ public final class PlayerEvents {
     cancelPendingServerStop(joined);
     lastKnownServer.put(e.getPlayer().getUniqueId(), joined);
     recentDisconnectServer.remove(e.getPlayer().getUniqueId());
+    recentConnectIntent.remove(e.getPlayer().getUniqueId());
     if (mgr.isKnown(joined)) {
       pluginOwner.firePlayerDelivered(e.getPlayer().getUniqueId(), joined);
       runQueuedArrivals(e.getPlayer().getUniqueId(), joined);
@@ -506,23 +519,32 @@ public final class PlayerEvents {
     cancelPendingConnect(id); // if waiting, stop the poller
     failAllQueuedArrivals(id);
     String reconnectServer = null;
+    String inFlightTarget = resolveRecentTimedTarget(recentConnectIntent, id);
+    if (inFlightTarget != null) {
+      reconnectServer = inFlightTarget;
+    }
 
     // If they were on a backend, maybe that backend is now empty
-    e.getPlayer().getCurrentServer().ifPresent(conn -> {
-      String name = conn.getServerInfo().getName();
-      if (mgr.isKnown(name)) {
-        rememberRecentDisconnect(id, name);
+    String currentServer = e.getPlayer().getCurrentServer()
+        .map(conn -> conn.getServerInfo().getName())
+        .orElse(null);
+    if (currentServer != null) {
+      if (reconnectServer == null && mgr.isKnown(currentServer)) {
+        reconnectServer = currentServer;
       }
-      scheduleStopIfServerEmpty(name);
-    });
+      scheduleStopIfServerEmpty(currentServer);
+    }
     String last = lastKnownServer.remove(id);
-    if (last != null) {
+    if (reconnectServer == null && last != null) {
       reconnectServer = last;
+    }
+    if (last != null) {
       scheduleStopIfServerEmpty(last);
     }
     if (reconnectServer != null && mgr.isKnown(reconnectServer)) {
       rememberRecentDisconnect(id, reconnectServer);
     }
+    recentConnectIntent.remove(id);
 
     // If the proxy became empty, also arm the stop-all as a safety net
     scheduleStopAllIfProxyEmpty();
@@ -1396,16 +1418,13 @@ public final class PlayerEvents {
   private String resolveRecentReconnectTarget(UUID playerUuid) {
     if (playerUuid == null) return null;
     if (cfg.reconnectWindowSeconds <= 0) return null;
-    RecentDisconnect recent = recentDisconnectServer.get(playerUuid);
-    if (recent != null) {
-      if (recent.expiresAtMs <= System.currentTimeMillis()) {
-        recentDisconnectServer.remove(playerUuid, recent);
-      } else if (recent.serverName != null && mgr.isKnown(recent.serverName)) {
-        return recent.serverName;
-      } else {
-        recentDisconnectServer.remove(playerUuid, recent);
-      }
-    }
+    String recent = resolveRecentTimedTarget(recentDisconnectServer, playerUuid);
+    if (recent != null) return recent;
+
+    // Covers fast hub -> backend -> disconnect races where the reconnect begins before
+    // DisconnectEvent or ServerConnectedEvent has finalized the remembered backend.
+    String intent = resolveRecentTimedTarget(recentConnectIntent, playerUuid);
+    if (intent != null) return intent;
 
     // Fallback for fast reconnects where the new login races the previous DisconnectEvent.
     String inFlight = lastKnownServer.get(playerUuid);
@@ -1421,6 +1440,29 @@ public final class PlayerEvents {
     }
     long expiresAt = System.currentTimeMillis() + (cfg.reconnectWindowSeconds * 1000L);
     recentDisconnectServer.put(playerUuid, new RecentDisconnect(serverName, expiresAt));
+  }
+
+  private void rememberRecentConnectIntent(UUID playerUuid, String serverName) {
+    if (playerUuid == null || serverName == null) {
+      return;
+    }
+    recentConnectIntent.put(playerUuid, new RecentDisconnect(serverName, System.currentTimeMillis() + CONNECT_INTENT_GRACE_MS));
+  }
+
+  private String resolveRecentTimedTarget(Map<UUID, RecentDisconnect> source, UUID playerUuid) {
+    RecentDisconnect recent = source.get(playerUuid);
+    if (recent == null) {
+      return null;
+    }
+    if (recent.expiresAtMs <= System.currentTimeMillis()) {
+      source.remove(playerUuid, recent);
+      return null;
+    }
+    if (recent.serverName == null || !mgr.isKnown(recent.serverName)) {
+      source.remove(playerUuid, recent);
+      return null;
+    }
+    return recent.serverName;
   }
 
   private static String sanitizeServerName(String name) {
