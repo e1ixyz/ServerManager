@@ -496,14 +496,27 @@ public final class PlayerEvents {
     cancelPendingStopAll(); // proxy not empty
 
     // Cancel any pending stop for the server they just joined
+    UUID playerId = e.getPlayer().getUniqueId();
     String joined = e.getServer().getServerInfo().getName();
     cancelPendingServerStop(joined);
-    lastKnownServer.put(e.getPlayer().getUniqueId(), joined);
-    recentDisconnectServer.remove(e.getPlayer().getUniqueId());
-    recentConnectIntent.remove(e.getPlayer().getUniqueId());
+    String reconnectTarget = resolveRecentReconnectTarget(playerId);
+    boolean shouldResumeReconnect = e.getPreviousServer().isEmpty()
+        && resolveManagedForcedHostTarget(e.getPlayer()) == null
+        && reconnectTarget != null
+        && !reconnectTarget.equals(joined)
+        && mgr.isKnown(reconnectTarget);
+
+    lastKnownServer.put(playerId, joined);
+    if (!shouldResumeReconnect) {
+      recentDisconnectServer.remove(playerId);
+      recentConnectIntent.remove(playerId);
+    }
     if (mgr.isKnown(joined)) {
-      pluginOwner.firePlayerDelivered(e.getPlayer().getUniqueId(), joined);
-      runQueuedArrivals(e.getPlayer().getUniqueId(), joined);
+      pluginOwner.firePlayerDelivered(playerId, joined);
+      runQueuedArrivals(playerId, joined);
+    }
+    if (shouldResumeReconnect) {
+      resumeReconnectFromCurrentServer(e.getPlayer(), reconnectTarget);
     }
 
     // If they switched from another backend, maybe that one is now empty -> schedule stop for it
@@ -1327,6 +1340,28 @@ public final class PlayerEvents {
     }
     Deque<QueuedArrivalTask> tasks = byServer.get(normalizeServerKey(serverName));
     return tasks != null && !tasks.isEmpty();
+  }
+
+  private void resumeReconnectFromCurrentServer(Player player, String serverName) {
+    if (player == null || serverName == null) {
+      return;
+    }
+    rememberRecentConnectIntent(player.getUniqueId(), serverName);
+    proxy.getScheduler().buildTask(pluginOwner, () -> {
+      Player live = proxy.getPlayer(player.getUniqueId()).orElse(null);
+      if (live == null) {
+        return;
+      }
+      RegisteredServer targetServer = proxy.getServer(serverName).orElse(null);
+      if (targetServer == null) {
+        return;
+      }
+      if (!mgr.isRunning(serverName) || !isReady(serverName)) {
+        queueAutoSend(live, serverName);
+        return;
+      }
+      attemptManagedConnect(live, targetServer, serverName, 0);
+    }).delay(Duration.ofMillis(100)).schedule();
   }
 
   private void flushDeferredBackendCommands(String server) {
