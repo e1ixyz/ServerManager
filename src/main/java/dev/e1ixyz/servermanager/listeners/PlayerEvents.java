@@ -84,7 +84,7 @@ public final class PlayerEvents {
   private final Set<UUID> readyNotifyOnce = ConcurrentHashMap.newKeySet();
   /** Last backend each player successfully reached (for disconnect scheduling). */
   private final Map<UUID, String> lastKnownServer = new ConcurrentHashMap<>();
-  /** Short-lived reconnect target after an unexpected disconnect. */
+  /** Short-lived reconnect target after leaving or disconnecting from the proxy. */
   private final Map<UUID, RecentDisconnect> recentDisconnectServer = new ConcurrentHashMap<>();
   /** Futures waiting for a backend to become ping-ready. */
   private final Map<String, Deque<CompletableFuture<Boolean>>> readyWaiters = new ConcurrentHashMap<>();
@@ -1397,16 +1397,22 @@ public final class PlayerEvents {
     if (playerUuid == null) return null;
     if (cfg.reconnectWindowSeconds <= 0) return null;
     RecentDisconnect recent = recentDisconnectServer.get(playerUuid);
-    if (recent == null) return null;
-    if (recent.expiresAtMs <= System.currentTimeMillis()) {
-      recentDisconnectServer.remove(playerUuid, recent);
-      return null;
+    if (recent != null) {
+      if (recent.expiresAtMs <= System.currentTimeMillis()) {
+        recentDisconnectServer.remove(playerUuid, recent);
+      } else if (recent.serverName != null && mgr.isKnown(recent.serverName)) {
+        return recent.serverName;
+      } else {
+        recentDisconnectServer.remove(playerUuid, recent);
+      }
     }
-    if (recent.serverName == null || !mgr.isKnown(recent.serverName)) {
-      recentDisconnectServer.remove(playerUuid, recent);
-      return null;
+
+    // Fallback for fast reconnects where the new login races the previous DisconnectEvent.
+    String inFlight = lastKnownServer.get(playerUuid);
+    if (inFlight != null && mgr.isKnown(inFlight)) {
+      return inFlight;
     }
-    return recent.serverName;
+    return null;
   }
 
   private void rememberRecentDisconnect(UUID playerUuid, String serverName) {

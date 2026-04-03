@@ -8,7 +8,7 @@ Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist beha
 - Starts the designated primary backend automatically on the first join and redirects the player with a customizable kick message.
 - Honors Velocity forced-host routing: when the proxy points a first-join at a non-primary backend, that server is started instead, with optional per-host MOTD and kick overrides.
 - Intercepts `/server <name>` (or GUI menu joins) to launch offline managed servers, keeps the player online, queues the connection, and auto-sends once the ping succeeds.
-- Remembers a player’s last managed backend for one minute after disconnect; quick rejoins return them there automatically unless a forced-host route overrides it.
+- Remembers a player’s last managed backend for one minute after leaving or disconnecting; quick rejoins return them there automatically unless a forced-host route overrides it.
 - Three-state MOTD (offline/starting/online) driven by MiniMessage templates, including a distinct "starting" banner.
 - Graceful per-server shutdowns when a backend empties, plus a safety stop-all when the entire proxy is empty with optional startup grace.
 - Admin hold command (`/sm hold`) keeps a backend online for a set window even when it is empty.
@@ -196,7 +196,7 @@ Key points:
 - Each server entry may set `vanillaWhitelistBypassesNetwork` to grant players on that backend's `whitelist.json` access to the network whitelist automatically, and `mirrorNetworkWhitelist` to push every accepted player back into that backend's vanilla whitelist (including via `/whitelist add` while it is online). When omitted, the primary server keeps the legacy behavior (bypass + mirror) and other servers remain opt-in.
 - Live vanilla whitelist console updates are now held until the backend responds to ping; file updates always happen immediately so offline servers still apply changes on next boot.
 - `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
-- `reconnectWindowSeconds` controls how long a disconnected player will be sent back to their last managed backend on rejoin. Set it to `0` to disable the feature.
+- `reconnectWindowSeconds` controls how long a player who leaves or disconnects will be sent back to their last managed backend on rejoin. Set it to `0` to disable the feature.
 - Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a short URL and one-time code and can redeem it through the built-in HTTP form.
 - `allowVanillaBypass: true` remains the default for the primary backend when the per-server flag is not set. Set it to `false` if you want even the primary server to ignore its vanilla whitelist entirely.
 - `moderation:` controls the proxy-level moderation registry used by the standalone `/ban`, `/stealthban`, `/ipban`, `/mute`, `/warn`, and list commands. When enabled (default) bans are enforced at login, before any backend starts.
