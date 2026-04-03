@@ -36,6 +36,7 @@ dev/e1ixyz/servermanager/moderation/ModerationService.class
 dev/e1ixyz/servermanager/moderation/AutoIpBanService$Decision.class
 dev/e1ixyz/servermanager/Config$Motd.class
 dev/e1ixyz/servermanager/whitelist/VanillaWhitelistChecker$VanillaEntry.class
+dev/e1ixyz/servermanager/listeners/PlayerEvents$RecentDisconnect.class
 dev/e1ixyz/servermanager/moderation/AutoIpBanService$SlidingWindow.class
 dev/e1ixyz/servermanager/ServerManagerPlugin.class
 dev/e1ixyz/servermanager/whitelist/VanillaWhitelistChecker$Cache.class

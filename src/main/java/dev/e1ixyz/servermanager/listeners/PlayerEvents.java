@@ -84,6 +84,8 @@ public final class PlayerEvents {
   private final Set<UUID> readyNotifyOnce = ConcurrentHashMap.newKeySet();
   /** Last backend each player successfully reached (for disconnect scheduling). */
   private final Map<UUID, String> lastKnownServer = new ConcurrentHashMap<>();
+  /** Short-lived reconnect target after an unexpected disconnect. */
+  private final Map<UUID, RecentDisconnect> recentDisconnectServer = new ConcurrentHashMap<>();
   /** Futures waiting for a backend to become ping-ready. */
   private final Map<String, Deque<CompletableFuture<Boolean>>> readyWaiters = new ConcurrentHashMap<>();
   /** Player-scoped actions that should run after the player lands on a specific backend. */
@@ -112,6 +114,16 @@ public final class PlayerEvents {
 
     RestartSchedule(long restartAtMs) {
       this.restartAtMs = restartAtMs;
+    }
+  }
+
+  private static final class RecentDisconnect {
+    final String serverName;
+    final long expiresAtMs;
+
+    private RecentDisconnect(String serverName, long expiresAtMs) {
+      this.serverName = serverName;
+      this.expiresAtMs = expiresAtMs;
     }
   }
 
@@ -336,10 +348,11 @@ public final class PlayerEvents {
   @Subscribe
   public void onChooseInitialServer(PlayerChooseInitialServerEvent event) {
     String forcedTarget = resolveManagedForcedHostTarget(event.getPlayer());
-    if (forcedTarget == null) return;
+    String preferredTarget = forcedTarget != null ? forcedTarget : resolveRecentReconnectTarget(event.getPlayer().getUniqueId());
+    if (preferredTarget == null) return;
 
-    proxy.getServer(forcedTarget).ifPresentOrElse(event::setInitialServer, () ->
-        log.warn("Forced-host target {} is managed but not registered with Velocity.", forcedTarget));
+    proxy.getServer(preferredTarget).ifPresentOrElse(event::setInitialServer, () ->
+        log.warn("Initial target {} is managed but not registered with Velocity.", preferredTarget));
   }
 
   // -------------- Gate all connects (/server <target>, menu join, etc.) --------------
@@ -350,15 +363,18 @@ public final class PlayerEvents {
     String target = (effective != null) ? effective.getServerInfo().getName() : null;
     Player player = event.getPlayer();
     if (event.getPreviousServer() == null) {
-      String forcedTarget = resolveManagedForcedHostTarget(player);
-      if (forcedTarget != null && !forcedTarget.equals(target)) {
-        var forcedServer = proxy.getServer(forcedTarget);
-        if (forcedServer.isPresent()) {
-          effective = forcedServer.get();
-          target = forcedTarget;
+      String preferredTarget = resolveManagedForcedHostTarget(player);
+      if (preferredTarget == null) {
+        preferredTarget = resolveRecentReconnectTarget(player.getUniqueId());
+      }
+      if (preferredTarget != null && !preferredTarget.equals(target)) {
+        var preferredServer = proxy.getServer(preferredTarget);
+        if (preferredServer.isPresent()) {
+          effective = preferredServer.get();
+          target = preferredTarget;
           event.setResult(ServerPreConnectEvent.ServerResult.allowed(effective));
         } else {
-          log.warn("Forced-host target {} is managed but not registered with Velocity.", forcedTarget);
+          log.warn("Initial target {} is managed but not registered with Velocity.", preferredTarget);
         }
       }
     }
@@ -471,6 +487,7 @@ public final class PlayerEvents {
     String joined = e.getServer().getServerInfo().getName();
     cancelPendingServerStop(joined);
     lastKnownServer.put(e.getPlayer().getUniqueId(), joined);
+    recentDisconnectServer.remove(e.getPlayer().getUniqueId());
     if (mgr.isKnown(joined)) {
       pluginOwner.firePlayerDelivered(e.getPlayer().getUniqueId(), joined);
       runQueuedArrivals(e.getPlayer().getUniqueId(), joined);
@@ -488,15 +505,23 @@ public final class PlayerEvents {
     UUID id = e.getPlayer().getUniqueId();
     cancelPendingConnect(id); // if waiting, stop the poller
     failAllQueuedArrivals(id);
+    String reconnectServer = null;
 
     // If they were on a backend, maybe that backend is now empty
     e.getPlayer().getCurrentServer().ifPresent(conn -> {
       String name = conn.getServerInfo().getName();
+      if (mgr.isKnown(name)) {
+        rememberRecentDisconnect(id, name);
+      }
       scheduleStopIfServerEmpty(name);
     });
     String last = lastKnownServer.remove(id);
     if (last != null) {
+      reconnectServer = last;
       scheduleStopIfServerEmpty(last);
+    }
+    if (reconnectServer != null && mgr.isKnown(reconnectServer)) {
+      rememberRecentDisconnect(id, reconnectServer);
     }
 
     // If the proxy became empty, also arm the stop-all as a safety net
@@ -1368,6 +1393,30 @@ public final class PlayerEvents {
     return null;
   }
 
+  private String resolveRecentReconnectTarget(UUID playerUuid) {
+    if (playerUuid == null) return null;
+    if (cfg.reconnectWindowSeconds <= 0) return null;
+    RecentDisconnect recent = recentDisconnectServer.get(playerUuid);
+    if (recent == null) return null;
+    if (recent.expiresAtMs <= System.currentTimeMillis()) {
+      recentDisconnectServer.remove(playerUuid, recent);
+      return null;
+    }
+    if (recent.serverName == null || !mgr.isKnown(recent.serverName)) {
+      recentDisconnectServer.remove(playerUuid, recent);
+      return null;
+    }
+    return recent.serverName;
+  }
+
+  private void rememberRecentDisconnect(UUID playerUuid, String serverName) {
+    if (playerUuid == null || serverName == null || cfg.reconnectWindowSeconds <= 0) {
+      return;
+    }
+    long expiresAt = System.currentTimeMillis() + (cfg.reconnectWindowSeconds * 1000L);
+    recentDisconnectServer.put(playerUuid, new RecentDisconnect(serverName, expiresAt));
+  }
+
   private static String sanitizeServerName(String name) {
     if (name == null) return null;
     String trimmed = name.trim();
@@ -1514,6 +1563,7 @@ public final class PlayerEvents {
     completeAllReadyWaiters(false);
     clearAllQueuedArrivals();
     lastKnownServer.clear();
+    recentDisconnectServer.clear();
     holdRestartTasks.values().forEach(rs -> {
       if (rs.warn1m != null) rs.warn1m.cancel();
       if (rs.warn5s != null) rs.warn5s.cancel();

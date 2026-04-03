@@ -15,6 +15,7 @@ public final class Config {
   public String kickMessage = "Server Starting";
   public int startupGraceSeconds = 15;
   public int stopGraceSeconds = 60;
+  public int reconnectWindowSeconds = 60;
 
   public Motd motd = new Motd();
   public Map<String, ServerConfig> servers = new LinkedHashMap<>();
@@ -161,6 +162,7 @@ public final class Config {
         kickMessage: "Server Starting"
         startupGraceSeconds: 15
         stopGraceSeconds: 60
+        reconnectWindowSeconds: 60
         motd:
           offline:  "<gray>Your Network</gray> <gray>- <white><server></white></gray>"
           offline2: "<red><bold>Server Offline - Join to Start</bold></red>"
@@ -322,6 +324,7 @@ public final class Config {
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;
     if (cfg.stopGraceSeconds < 0) cfg.stopGraceSeconds = 0;
+    if (cfg.reconnectWindowSeconds < 0) cfg.reconnectWindowSeconds = 0;
     if (cfg.whitelist.codeLength < 4) cfg.whitelist.codeLength = 4;
     if (cfg.whitelist.codeTtlSeconds < 60) cfg.whitelist.codeTtlSeconds = 60;
 
