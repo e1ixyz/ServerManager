@@ -511,12 +511,19 @@ public final class PlayerEvents {
     String joined = e.getServer().getServerInfo().getName();
     cancelPendingServerStop(joined);
     String reconnectTarget = resolveRecentReconnectTarget(playerId);
-    boolean shouldResumeReconnect = e.getPreviousServer().isEmpty()
-        && resolveManagedForcedHostTarget(e.getPlayer()) == null
-        && resolveJoinPreferenceTarget(e.getPlayer()) == null
-        && reconnectTarget != null
-        && !reconnectTarget.equals(joined)
-        && mgr.isKnown(reconnectTarget);
+    String preferenceTarget = resolveJoinPreferenceTarget(e.getPlayer());
+    String postJoinRedirectTarget = null;
+    if (e.getPreviousServer().isEmpty() && resolveManagedForcedHostTarget(e.getPlayer()) == null) {
+      if (preferenceTarget != null && !preferenceTarget.equals(joined) && mgr.isKnown(preferenceTarget)) {
+        postJoinRedirectTarget = preferenceTarget;
+      } else if (preferenceTarget == null
+          && reconnectTarget != null
+          && !reconnectTarget.equals(joined)
+          && mgr.isKnown(reconnectTarget)) {
+        postJoinRedirectTarget = reconnectTarget;
+      }
+    }
+    boolean shouldResumeReconnect = postJoinRedirectTarget != null;
 
     lastKnownServer.put(playerId, joined);
     if (!shouldResumeReconnect) {
@@ -528,7 +535,7 @@ public final class PlayerEvents {
       runQueuedArrivals(playerId, joined);
     }
     if (shouldResumeReconnect) {
-      resumeReconnectFromCurrentServer(e.getPlayer(), reconnectTarget);
+      resumeReconnectFromCurrentServer(e.getPlayer(), postJoinRedirectTarget);
     }
 
     // If they switched from another backend, maybe that one is now empty -> schedule stop for it
