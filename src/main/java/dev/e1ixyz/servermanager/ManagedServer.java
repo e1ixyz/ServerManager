@@ -286,10 +286,14 @@ final class ManagedServer {
               "do script \"" + escapeAppleScriptString(terminalCommand) + "\"\n" +
               "delay 0.2\n" +
               "set w to front window\n" +
+              "set tabTty to \"\"\n" +
+              "try\n" +
+              "set tabTty to (tty of selected tab of w as string)\n" +
+              "end try\n" +
               "try\n" +
               "set custom title of selected tab of w to \"" + escapeAppleScriptString(title) + "\"\n" +
               "end try\n" +
-              "return id of w as string\n" +
+              "return (id of w as string) & \"\\t\" & tabTty\n" +
               "end tell";
 
       Process p = new ProcessBuilder("osascript", "-e", appleScript).start();
@@ -302,16 +306,26 @@ final class ManagedServer {
         externalConsoleWindowId = null;
         externalConsoleTty = null;
       } else {
+        String tty = null;
         if (!out.isBlank()) {
+          String[] parts = out.split("\\t", 2);
+          String idPart = parts[0].trim();
           try {
-            externalConsoleWindowId = Long.parseLong(out);
+            externalConsoleWindowId = Long.parseLong(idPart);
           } catch (NumberFormatException ignored) {
             externalConsoleWindowId = null;
           }
-        } else {
+          if (parts.length > 1) {
+            tty = normalizeTty(parts[1]);
+          }
+        }
+        if (externalConsoleWindowId == null) {
           externalConsoleWindowId = null;
         }
-        externalConsoleTty = null;
+        if (tty == null || tty.isBlank()) {
+          tty = resolveTerminalTtyByTitle(title);
+        }
+        externalConsoleTty = normalizeTty(tty);
       }
     } catch (Exception ex) {
       log.warn("[{}] failed to open Terminal console window", name, ex);
@@ -328,6 +342,10 @@ final class ManagedServer {
     File commandFile = externalConsoleCommandFile;
     externalConsoleCommandFile = null;
     truncateCommandSpool(commandFile);
+    if (tty == null || tty.isBlank()) {
+      tty = resolveTerminalTtyByTitle(title);
+    }
+    terminateTerminalTty(tty);
     if ((windowId == null) && (tty == null || tty.isBlank()) && (title == null || title.isBlank())) return;
     if (!isMacOs()) return;
 
@@ -338,15 +356,8 @@ final class ManagedServer {
                 "repeat with w in windows\n" +
                 "if id of w is " + windowId + " then\n" +
                 "try\n" +
-                "do script \"exit\" in selected tab of w\n" +
-                "end try\n" +
-                "repeat 10 times\n" +
-                "try\n" +
-                "if busy of selected tab of w is false then exit repeat\n" +
-                "end try\n" +
-                "delay 0.2\n" +
-                "end repeat\n" +
                 "close w saving no\n" +
+                "end try\n" +
                 "return\n" +
                 "end if\n" +
                 "end repeat\n" +
@@ -365,15 +376,8 @@ final class ManagedServer {
                 "repeat with t in tabs of w\n" +
                 "if (tty of t as text) is \"" + escapeAppleScriptString(tty) + "\" then\n" +
                 "try\n" +
-                "do script \"exit\" in t\n" +
-                "end try\n" +
-                "repeat 10 times\n" +
-                "try\n" +
-                "if busy of t is false then exit repeat\n" +
-                "end try\n" +
-                "delay 0.2\n" +
-                "end repeat\n" +
                 "close w saving no\n" +
+                "end try\n" +
                 "return\n" +
                 "end if\n" +
                 "end repeat\n" +
@@ -393,15 +397,8 @@ final class ManagedServer {
               "repeat with t in tabs of w\n" +
               "if custom title of t is \"" + escapeAppleScriptString(title) + "\" then\n" +
               "try\n" +
-              "do script \"exit\" in t\n" +
-              "end try\n" +
-              "repeat 10 times\n" +
-              "try\n" +
-              "if busy of t is false then exit repeat\n" +
-              "end try\n" +
-              "delay 0.2\n" +
-              "end repeat\n" +
               "close w saving no\n" +
+              "end try\n" +
               "return\n" +
               "end if\n" +
               "end repeat\n" +
@@ -432,6 +429,54 @@ final class ManagedServer {
 
   private static String decodeRandomAccessLine(String raw) {
     return new String(raw.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+  }
+
+  private String resolveTerminalTtyByTitle(String title) {
+    if (!isMacOs() || title == null || title.isBlank()) return null;
+    try {
+      String script =
+          "tell application \"Terminal\"\n" +
+              "repeat with w in windows\n" +
+              "repeat with t in tabs of w\n" +
+              "if custom title of t is \"" + escapeAppleScriptString(title) + "\" then\n" +
+              "try\n" +
+              "return tty of t as string\n" +
+              "end try\n" +
+              "end if\n" +
+              "end repeat\n" +
+              "end repeat\n" +
+              "end tell";
+      Process p = new ProcessBuilder("osascript", "-e", script).start();
+      String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+      p.waitFor();
+      return normalizeTty(out);
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
+
+  private void terminateTerminalTty(String tty) {
+    if (!isMacOs()) return;
+    String normalized = normalizeTty(tty);
+    if (normalized == null || normalized.isBlank()) return;
+    String shortTty = normalized.startsWith("/dev/") ? normalized.substring(5) : normalized;
+    String cmd = "pkill -TERM -t " + shQuote(shortTty) + " >/dev/null 2>&1 || true; " +
+        "sleep 0.25; " +
+        "pkill -KILL -t " + shQuote(shortTty) + " >/dev/null 2>&1 || true";
+    try {
+      Process p = new ProcessBuilder("sh", "-lc", cmd).start();
+      p.waitFor();
+    } catch (Exception ignored) {
+    }
+  }
+
+  private static String normalizeTty(String tty) {
+    if (tty == null) return null;
+    String trimmed = tty.trim();
+    if (trimmed.isEmpty()) return null;
+    if (trimmed.startsWith("/dev/")) return trimmed;
+    if (trimmed.startsWith("ttys") || trimmed.startsWith("tty")) return "/dev/" + trimmed;
+    return trimmed;
   }
 
   private static void truncateCommandSpool(File commandFile) {
