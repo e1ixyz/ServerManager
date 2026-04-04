@@ -4,6 +4,7 @@ import dev.e1ixyz.servermanager.Config;
 import dev.e1ixyz.servermanager.ServerManagerPlugin;
 import dev.e1ixyz.servermanager.ServerProcessManager;
 import dev.e1ixyz.servermanager.moderation.ModerationService;
+import dev.e1ixyz.servermanager.preferences.JoinPreferenceService;
 import dev.e1ixyz.servermanager.whitelist.VanillaWhitelistChecker;
 import dev.e1ixyz.servermanager.whitelist.WhitelistService;
 import com.velocitypowered.api.command.CommandSource;
@@ -47,6 +48,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final String[] PERM_RELOAD = {"servermanager.command.reload", "servermanager.reload"};
   private static final String[] PERM_WHITELIST = {"servermanager.command.whitelist", "servermanager.whitelist"};
   private static final String[] PERM_HELP = {"servermanager.command.help", "servermanager.help"};
+  private static final String[] PERM_PREFERENCE = {};
   private static final Pattern DURATION_TOKEN = Pattern.compile("(?i)(\\d+)([dhms]?)");
   private static final long HOLD_FOREVER = Long.MAX_VALUE;
   private static final int UPDATE_READY_TIMEOUT_SECONDS = 120;
@@ -55,6 +57,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final String WL_USAGE = "<gray>Usage:</gray> <white>/sm whitelist <green>network</green>|<green>vanilla</green> …</white>";
   private static final String WL_NETWORK_USAGE = "<gray>Usage:</gray> <white>/sm whitelist network <green>list</green>|<green>add</green>|<green>remove</green> …</white>";
   private static final String WL_VANILLA_USAGE = "<gray>Usage:</gray> <white>/sm whitelist vanilla <server> <green>list</green>|<green>add</green>|<green>remove</green>|<green>on</green>|<green>off</green>|<green>status</green> …</white>";
+  private static final String PREF_USAGE = "<gray>Usage:</gray> <white>/sm preference <green>set</green> <server>|<green>clear</green>|<green>status</green>|<green>join</green> [server]</white>";
   private static final SubcommandMeta CMD_STATUS = command("status", PERM_STATUS);
   private static final SubcommandMeta CMD_START = command("start", PERM_START);
   private static final SubcommandMeta CMD_STOP = command("stop", PERM_STOP);
@@ -62,9 +65,10 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final SubcommandMeta CMD_UPDATEPLUGINS = command("updateplugins", PERM_UPDATEPLUGINS);
   private static final SubcommandMeta CMD_RELOAD = command("reload", PERM_RELOAD);
   private static final SubcommandMeta CMD_WHITELIST = command("whitelist", PERM_WHITELIST);
+  private static final SubcommandMeta CMD_PREFERENCE = command("preference", PERM_PREFERENCE, "pref", "joinpref");
   private static final SubcommandMeta CMD_HELP = command("help", PERM_HELP);
   private static final List<SubcommandMeta> SUBCOMMANDS = List.of(
-      CMD_STATUS, CMD_START, CMD_STOP, CMD_HOLD, CMD_UPDATEPLUGINS, CMD_RELOAD, CMD_WHITELIST, CMD_HELP
+      CMD_STATUS, CMD_START, CMD_STOP, CMD_HOLD, CMD_UPDATEPLUGINS, CMD_RELOAD, CMD_WHITELIST, CMD_PREFERENCE, CMD_HELP
   );
   private static final List<HelpEntry> HELP_ENTRIES = List.of(
       help(CMD_STATUS, "<white>/sm status</white> <gray>- View the state of all managed servers.</gray>"),
@@ -75,6 +79,7 @@ public final class ServerManagerCmd implements SimpleCommand {
       help(CMD_RELOAD, "<white>/sm reload</white> <gray>- Reload ServerManager config and listeners.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist network <list|add|remove></white> <gray>- Manage the shared network whitelist.</gray>"),
       help(CMD_WHITELIST, "<white>/sm whitelist vanilla [server] <list|add|remove|on|off|status></white> <gray>- Manage vanilla whitelist settings per backend.</gray>"),
+      help(CMD_PREFERENCE, "<white>/sm preference <set|clear|status|join></white> <gray>- Set your preferred backend for direct joins.</gray>"),
       help(CMD_HELP, "<white>/sm help</white> <gray>- Show this staff help menu.</gray>")
   );
   private static final List<String> HOLD_KEYWORDS = List.of("clear", "cancel", "off", "remove");
@@ -82,6 +87,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final List<String> WHITELIST_SCOPES = List.of("network", "vanilla");
   private static final List<String> NETWORK_WL_ACTIONS = List.of("list", "add", "remove", "delete");
   private static final List<String> VANILLA_WL_ACTIONS = List.of("list", "add", "remove", "on", "off", "enable", "disable", "status", "state");
+  private static final List<String> PREFERENCE_ACTIONS = List.of("set", "clear", "status", "join");
   private static SubcommandMeta command(String primary, String[] perms, String... aliases) {
     List<String> triggers = new ArrayList<>();
     triggers.add(primary);
@@ -133,6 +139,7 @@ public final class ServerManagerCmd implements SimpleCommand {
   private volatile WhitelistService whitelist;
   private volatile VanillaWhitelistChecker vanillaWhitelist;
   private volatile ModerationService moderation;
+  private volatile JoinPreferenceService joinPreferences;
   private final Logger log;
   private final ServerManagerPlugin plugin;
   private final ProxyServer proxy;
@@ -362,12 +369,167 @@ public final class ServerManagerCmd implements SimpleCommand {
 
   public void updateState(ServerProcessManager mgr, Config cfg,
                           WhitelistService whitelist, VanillaWhitelistChecker vanillaWhitelist,
-                          ModerationService moderation) {
+                          ModerationService moderation, JoinPreferenceService joinPreferences) {
     this.mgr = mgr;
     this.cfg = cfg;
     this.whitelist = whitelist;
     this.vanillaWhitelist = vanillaWhitelist;
     this.moderation = moderation;
+    this.joinPreferences = joinPreferences;
+  }
+
+  private void handlePreferenceCommand(CommandSource src, String[] args) {
+    if (!(src instanceof Player player)) {
+      src.sendMessage(Component.text("Only players can use preference commands."));
+      return;
+    }
+    if (mgr == null || cfg == null || joinPreferences == null) {
+      player.sendMessage(Component.text("Join preferences are not ready yet."));
+      return;
+    }
+
+    if (args.length == 0 || equalsIgnoreCase(args[0], "status")) {
+      showPreferenceStatus(player);
+      return;
+    }
+
+    String action = args[0].toLowerCase(Locale.ROOT);
+    switch (action) {
+      case "set" -> {
+        if (args.length < 2) {
+          player.sendMessage(mm0(PREF_USAGE));
+          return;
+        }
+        setJoinPreference(player, args[1]);
+      }
+      case "clear", "remove", "delete", "off", "none", "reset" -> {
+        try {
+          boolean removed = joinPreferences.clearPreferredServer(player.getUniqueId());
+          if (removed) {
+            player.sendMessage(Component.text("Cleared your preferred join server."));
+          } else {
+            player.sendMessage(Component.text("You do not have a preferred join server set."));
+          }
+        } catch (IOException ex) {
+          log.error("Failed to clear join preference for {}", player.getUsername(), ex);
+          player.sendMessage(Component.text("Failed to clear join preference. Please try again."));
+        }
+      }
+      case "join" -> {
+        if (args.length >= 2) {
+          String explicitTarget = resolveKnownServer(args[1]);
+          if (explicitTarget == null) {
+            player.sendMessage(mm2(cfg.messages.unknownServer, args[1], player.getUsername()));
+            return;
+          }
+          setJoinPreference(player, explicitTarget);
+          connectPlayerToServer(player, explicitTarget);
+          return;
+        }
+        String preferred = joinPreferences.preferredServer(player.getUniqueId());
+        String resolved = resolveKnownServer(preferred);
+        if (resolved == null) {
+          player.sendMessage(Component.text("No valid preferred server is set. Use /sm preference set <server>."));
+          return;
+        }
+        connectPlayerToServer(player, resolved);
+      }
+      default -> {
+        String directTarget = resolveKnownServer(args[0]);
+        if (directTarget == null) {
+          player.sendMessage(mm0(PREF_USAGE));
+          return;
+        }
+        setJoinPreference(player, directTarget);
+      }
+    }
+  }
+
+  private void showPreferenceStatus(Player player) {
+    if (joinPreferences == null) {
+      player.sendMessage(Component.text("Join preferences are not ready yet."));
+      return;
+    }
+    String raw = joinPreferences.preferredServer(player.getUniqueId());
+    if (raw == null) {
+      player.sendMessage(Component.text("Preferred join server: none"));
+      return;
+    }
+    String resolved = resolveKnownServer(raw);
+    if (resolved == null) {
+      player.sendMessage(Component.text("Preferred join server is set to '" + raw + "' but that server is no longer configured."));
+      player.sendMessage(Component.text("Run /sm preference clear to remove it."));
+      return;
+    }
+    player.sendMessage(Component.text("Preferred join server: " + resolved));
+  }
+
+  private void setJoinPreference(Player player, String serverToken) {
+    if (joinPreferences == null) {
+      player.sendMessage(Component.text("Join preferences are not ready yet."));
+      return;
+    }
+    String resolved = resolveKnownServer(serverToken);
+    if (resolved == null) {
+      player.sendMessage(mm2(cfg.messages.unknownServer, serverToken, player.getUsername()));
+      return;
+    }
+
+    try {
+      joinPreferences.setPreferredServer(player.getUniqueId(), resolved);
+      player.sendMessage(Component.text("Preferred join server set to " + resolved + "."));
+      player.sendMessage(Component.text("Use /sm preference join to connect there now."));
+    } catch (IOException ex) {
+      log.error("Failed to save join preference for {}", player.getUsername(), ex);
+      player.sendMessage(Component.text("Failed to save join preference. Please try again."));
+    }
+  }
+
+  private void connectPlayerToServer(Player player, String server) {
+    if (player == null || server == null) return;
+    RegisteredServer target = proxy.getServer(server).orElse(null);
+    if (target == null) {
+      player.sendMessage(Component.text("Velocity does not know server " + server + "."));
+      return;
+    }
+
+    String current = player.getCurrentServer()
+        .map(conn -> conn.getServerInfo().getName())
+        .orElse(null);
+    if (server.equalsIgnoreCase(current)) {
+      player.sendMessage(Component.text("You are already connected to " + server + "."));
+      return;
+    }
+
+    player.sendMessage(Component.text("Sending you to " + server + "..."));
+    player.createConnectionRequest(target).connect().whenComplete((result, error) -> {
+      if (error != null) {
+        log.warn("Failed preference connection for {} -> {}", player.getUsername(), server, error);
+        player.sendMessage(Component.text("Failed to connect to " + server + "."));
+        return;
+      }
+      if (result == null || result.isSuccessful()) {
+        return;
+      }
+      result.getReasonComponent().ifPresentOrElse(
+          player::sendMessage,
+          () -> player.sendMessage(Component.text("Failed to connect to " + server + ".")));
+    });
+  }
+
+  private String resolveKnownServer(String serverToken) {
+    if (serverToken == null || mgr == null || cfg == null || cfg.servers == null || cfg.servers.isEmpty()) {
+      return null;
+    }
+    if (mgr.isKnown(serverToken)) {
+      return serverToken;
+    }
+    for (String configured : cfg.servers.keySet()) {
+      if (configured.equalsIgnoreCase(serverToken)) {
+        return configured;
+      }
+    }
+    return null;
   }
 
   @Override
@@ -564,6 +726,7 @@ public final class ServerManagerCmd implements SimpleCommand {
         }
         handleWhitelistCommand(src, tail(args, 1));
       }
+      case "preference", "pref", "joinpref" -> handlePreferenceCommand(src, tail(args, 1));
       default -> src.sendMessage(mm0(config.messages.usage));
     }
   }
@@ -593,6 +756,7 @@ public final class ServerManagerCmd implements SimpleCommand {
       case "hold" -> suggestHold(args);
       case "updateplugins" -> suggestUpdatePlugins(args);
       case "whitelist" -> suggestWhitelist(args);
+      case "preference" -> suggestPreference(args);
       case "status", "reload", "help" -> List.of();
       default -> List.of();
     };
@@ -680,6 +844,20 @@ public final class ServerManagerCmd implements SimpleCommand {
       }
       if ("vanilla".equalsIgnoreCase(scope)) {
         return suggestWhitelistVanilla(args);
+      }
+    }
+    return List.of();
+  }
+
+  private List<String> suggestPreference(String[] args) {
+    if (args.length == 2) {
+      List<String> options = new ArrayList<>(PREFERENCE_ACTIONS);
+      options.addAll(cfg.servers.keySet());
+      return filterOptions(options, args[1]);
+    }
+    if (args.length == 3) {
+      if (equalsIgnoreCase(args[1], "set", "join")) {
+        return suggestServers(args[2]);
       }
     }
     return List.of();

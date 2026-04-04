@@ -5,6 +5,7 @@ import dev.e1ixyz.servermanager.ServerManagerPlugin;
 import dev.e1ixyz.servermanager.ServerProcessManager;
 import dev.e1ixyz.servermanager.moderation.AutoIpBanService;
 import dev.e1ixyz.servermanager.moderation.ModerationService;
+import dev.e1ixyz.servermanager.preferences.JoinPreferenceService;
 import dev.e1ixyz.servermanager.whitelist.VanillaWhitelistChecker;
 import dev.e1ixyz.servermanager.whitelist.WhitelistService;
 import com.velocitypowered.api.event.Subscribe;
@@ -62,6 +63,7 @@ public final class PlayerEvents {
   private final Logger log;
   private final WhitelistService whitelist;
   private final VanillaWhitelistChecker vanillaWhitelist;
+  private final JoinPreferenceService joinPreferences;
   private final ModerationService moderation;
   private final AutoIpBanService autoIpBan;
   private final Config.Whitelist whitelistCfg;
@@ -149,7 +151,8 @@ public final class PlayerEvents {
       Logger log,
       WhitelistService whitelist,
       VanillaWhitelistChecker vanillaWhitelist,
-      ModerationService moderation
+      ModerationService moderation,
+      JoinPreferenceService joinPreferences
   ) {
     this.pluginOwner = pluginOwner;
     this.proxy = proxy;
@@ -158,6 +161,7 @@ public final class PlayerEvents {
     this.log = log;
     this.whitelist = whitelist;
     this.vanillaWhitelist = vanillaWhitelist;
+    this.joinPreferences = joinPreferences;
     this.moderation = moderation;
     this.autoIpBan = new AutoIpBanService(cfg.autoIpBan, moderation, log);
     this.whitelistCfg = (whitelist != null) ? whitelist.config() : null;
@@ -352,11 +356,15 @@ public final class PlayerEvents {
   @Subscribe
   public void onChooseInitialServer(PlayerChooseInitialServerEvent event) {
     String forcedTarget = resolveManagedForcedHostTarget(event.getPlayer());
-    String preferredTarget = forcedTarget != null ? forcedTarget : resolveRecentReconnectTarget(event.getPlayer().getUniqueId());
+    String preferredTarget = forcedTarget != null ? forcedTarget : resolveJoinPreferenceTarget(event.getPlayer());
+    if (preferredTarget == null) {
+      preferredTarget = resolveRecentReconnectTarget(event.getPlayer().getUniqueId());
+    }
     if (preferredTarget == null) return;
 
-    proxy.getServer(preferredTarget).ifPresentOrElse(event::setInitialServer, () ->
-        log.warn("Initial target {} is managed but not registered with Velocity.", preferredTarget));
+    String finalTarget = preferredTarget;
+    proxy.getServer(finalTarget).ifPresentOrElse(event::setInitialServer, () ->
+        log.warn("Initial target {} is managed but not registered with Velocity.", finalTarget));
   }
 
   // -------------- Gate all connects (/server <target>, menu join, etc.) --------------
@@ -368,6 +376,9 @@ public final class PlayerEvents {
     Player player = event.getPlayer();
     if (event.getPreviousServer() == null) {
       String preferredTarget = resolveManagedForcedHostTarget(player);
+      if (preferredTarget == null) {
+        preferredTarget = resolveJoinPreferenceTarget(player);
+      }
       if (preferredTarget == null) {
         preferredTarget = resolveRecentReconnectTarget(player.getUniqueId());
       }
@@ -502,6 +513,7 @@ public final class PlayerEvents {
     String reconnectTarget = resolveRecentReconnectTarget(playerId);
     boolean shouldResumeReconnect = e.getPreviousServer().isEmpty()
         && resolveManagedForcedHostTarget(e.getPlayer()) == null
+        && resolveJoinPreferenceTarget(e.getPlayer()) == null
         && reconnectTarget != null
         && !reconnectTarget.equals(joined)
         && mgr.isKnown(reconnectTarget);
@@ -1413,6 +1425,13 @@ public final class PlayerEvents {
     String target = sanitizeServerName(hostCfg.server);
     if (target == null || !mgr.isKnown(target)) return null;
     return target;
+  }
+
+  private String resolveJoinPreferenceTarget(Player player) {
+    if (player == null || joinPreferences == null) return null;
+    String preferred = sanitizeServerName(joinPreferences.preferredServer(player.getUniqueId()));
+    if (preferred == null || !mgr.isKnown(preferred)) return null;
+    return preferred;
   }
 
   private String resolveTrackedServer(Config.ForcedHost hostCfg, String normalizedHost) {

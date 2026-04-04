@@ -43,7 +43,7 @@ public final class Config {
     public String timeout        = "<red><white><server></white> didn’t come up in time.</red>";
     public String unknownServer  = "<red>Unknown server <white><server></white>.</red>";
     public String noPermission   = "<red>You don’t have permission.</red>";
-    public String usage          = "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green>|<green>updateplugins</green> ...</white>";
+    public String usage          = "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green>|<green>updateplugins</green>|<green>preference</green> ...</white>";
     public String helpHeader     = "<gray>ServerManager commands:</gray>";
     public String holdUsage      = "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|forever|clear></green></white>";
     public String updatePluginsUsage = "<gray>Usage:</gray> <white>/sm updateplugins <green><server></green> <green><waiting></green></white>";
@@ -177,7 +177,7 @@ public final class Config {
           timeout:        "<red><white><server></white> didn't come up in time.</red>"
           unknownServer:  "<red>Unknown server <white><server></white>.</red>"
           noPermission:   "<red>You don't have permission.</red>"
-          usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green>|<green>updateplugins</green> ...</white>"
+          usage:          "<gray>Usage:</gray> <white>/sm <green>start</green>|<green>stop</green>|<green>status</green>|<green>hold</green>|<green>updateplugins</green>|<green>preference</green> ...</white>"
           helpHeader:     "<gray>ServerManager commands:</gray>"
           holdUsage:      "<gray>Usage:</gray> <white>/sm hold <green><server></green> <green><duration|forever|clear></green></white>"
           updatePluginsUsage: "<gray>Usage:</gray> <white>/sm updateplugins <green><server></green> <green><waiting></green></white>"

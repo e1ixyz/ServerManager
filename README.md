@@ -8,6 +8,7 @@ Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist beha
 - Starts the designated primary backend automatically on the first join and redirects the player with a customizable kick message.
 - Honors Velocity forced-host routing: when the proxy points a first-join at a non-primary backend, that server is started instead, with optional per-host MOTD and kick overrides.
 - Intercepts `/server <name>` (or GUI menu joins) to launch offline managed servers, keeps the player online, queues the connection, and auto-sends once the ping succeeds.
+- Players can set a preferred backend (`/sm preference`) so first-join routing goes directly there instead of the default hub.
 - Remembers a player’s last managed backend for one minute after leaving or disconnecting; quick rejoins return them there automatically unless a forced-host route overrides it.
 - Three-state MOTD (offline/starting/online) driven by MiniMessage templates, including a distinct "starting" banner.
 - Graceful per-server shutdowns when a backend empties, plus a safety stop-all when the entire proxy is empty with optional startup grace.
@@ -295,6 +296,7 @@ Root command aliases: `/servermanager`, `/sm`
 | `updateplugins` | `servermanager.command.updateplugins`  | Starts a waiting backend, moves all online players there, restarts the target backend, and returns everyone once the target is ready again. |
 | `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
 | `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`, and toggles vanilla whitelist enforcement per server. |
+| `preference` (`pref`, `joinpref`) | None (available to all players) | Sets/clears/shows each player's preferred first-join backend, with optional immediate connect via `join`. |
 
 Durations default to minutes when no unit is supplied. Use `forever` for an indefinite hold. Run `/sm hold <server>` to check the remaining time or `/sm hold <server> clear` to release it early. When a server is held forever and `autoRestartHoldTime` is set (HH:mm), it will automatically restart at that daily time with in-game warnings at 1 minute and 5 seconds.
 

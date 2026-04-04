@@ -3,6 +3,7 @@ package dev.e1ixyz.servermanager;
 import dev.e1ixyz.servermanager.commands.ServerManagerCmd;
 import dev.e1ixyz.servermanager.listeners.PlayerEvents;
 import dev.e1ixyz.servermanager.moderation.ModerationService;
+import dev.e1ixyz.servermanager.preferences.JoinPreferenceService;
 import dev.e1ixyz.servermanager.whitelist.WhitelistHttpServer;
 import dev.e1ixyz.servermanager.whitelist.WhitelistService;
 import dev.e1ixyz.servermanager.whitelist.VanillaWhitelistChecker;
@@ -44,6 +45,7 @@ public final class ServerManagerPlugin {
   private WhitelistService whitelistService;
   private WhitelistHttpServer whitelistHttpServer;
   private VanillaWhitelistChecker vanillaWhitelist;
+  private JoinPreferenceService joinPreferences;
   private PlayerEvents playerEvents;
   private ServerManagerCmd rootCommand;
   private ModerationService moderation;
@@ -68,7 +70,7 @@ public final class ServerManagerPlugin {
       var cm = proxy.getCommandManager();
       var meta = cm.metaBuilder("servermanager").aliases("sm").plugin(this).build();
       this.rootCommand = new ServerManagerCmd(this, proxy, logger);
-      this.rootCommand.updateState(processManager, config, whitelistService, vanillaWhitelist, moderation);
+      this.rootCommand.updateState(processManager, config, whitelistService, vanillaWhitelist, moderation, joinPreferences);
       cm.register(meta, rootCommand);
       registerModerationCommands();
 
@@ -154,15 +156,16 @@ public final class ServerManagerPlugin {
     this.config = newConfig;
     this.whitelistService = new WhitelistService(newConfig.whitelist, logger, dataDir);
     this.vanillaWhitelist = new VanillaWhitelistChecker(newConfig, logger);
+    this.joinPreferences = new JoinPreferenceService(logger, dataDir);
     this.moderation = new ModerationService(newConfig.moderation, logger, dataDir);
     this.whitelistHttpServer = new WhitelistHttpServer(newConfig.whitelist, logger, whitelistService);
     this.whitelistHttpServer.start();
     this.playerEvents = new PlayerEvents(this, proxy, newConfig, processManager, logger,
-        whitelistService, vanillaWhitelist, moderation);
+        whitelistService, vanillaWhitelist, moderation, joinPreferences);
     proxy.getEventManager().register(this, playerEvents);
     registerModerationCommands();
     if (rootCommand != null) {
-      rootCommand.updateState(processManager, newConfig, whitelistService, vanillaWhitelist, moderation);
+      rootCommand.updateState(processManager, newConfig, whitelistService, vanillaWhitelist, moderation, joinPreferences);
     }
   }
 
