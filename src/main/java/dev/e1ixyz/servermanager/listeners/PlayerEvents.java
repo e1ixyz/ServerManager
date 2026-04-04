@@ -510,11 +510,14 @@ public final class PlayerEvents {
     UUID playerId = e.getPlayer().getUniqueId();
     String joined = e.getServer().getServerInfo().getName();
     cancelPendingServerStop(joined);
+    String forcedTarget = resolveManagedForcedHostTarget(e.getPlayer());
     String reconnectTarget = resolveRecentReconnectTarget(playerId);
     String preferenceTarget = resolveJoinPreferenceTarget(e.getPlayer());
     String postJoinRedirectTarget = null;
-    if (e.getPreviousServer().isEmpty() && resolveManagedForcedHostTarget(e.getPlayer()) == null) {
-      if (preferenceTarget != null && !preferenceTarget.equals(joined) && mgr.isKnown(preferenceTarget)) {
+    if (e.getPreviousServer().isEmpty()) {
+      if (forcedTarget != null && !forcedTarget.equals(joined) && mgr.isKnown(forcedTarget)) {
+        postJoinRedirectTarget = forcedTarget;
+      } else if (preferenceTarget != null && !preferenceTarget.equals(joined) && mgr.isKnown(preferenceTarget)) {
         postJoinRedirectTarget = preferenceTarget;
       } else if (preferenceTarget == null
           && reconnectTarget != null
@@ -1371,15 +1374,7 @@ public final class PlayerEvents {
       if (live == null) {
         return;
       }
-      RegisteredServer targetServer = proxy.getServer(serverName).orElse(null);
-      if (targetServer == null) {
-        return;
-      }
-      if (!mgr.isRunning(serverName) || !isReady(serverName)) {
-        queueAutoSend(live, serverName);
-        return;
-      }
-      attemptManagedConnect(live, targetServer, serverName, 0);
+      connectPlayerWhenReady(live, serverName, null);
     }).delay(Duration.ofMillis(100)).schedule();
   }
 
