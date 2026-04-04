@@ -236,7 +236,9 @@ final class ManagedServer {
 
     try {
       String logPath = logOutputFile.getAbsolutePath();
-      String title = "SM-" + sanitizeFileToken(name);
+      String titlePrefix = "SM-" + sanitizeFileToken(name);
+      closeConsoleWindowsByTitlePrefix(titlePrefix);
+      String title = titlePrefix + "-" + serverPid;
       this.externalConsoleTitle = title;
       this.externalConsoleCommandFile = commandSpoolFile;
       String commandPath = commandSpoolFile == null ? null : commandSpoolFile.getAbsolutePath();
@@ -283,15 +285,15 @@ final class ManagedServer {
       String appleScript =
           "tell application \"Terminal\"\n" +
               "activate\n" +
-              "do script \"" + escapeAppleScriptString(terminalCommand) + "\"\n" +
+              "set t to do script \"" + escapeAppleScriptString(terminalCommand) + "\"\n" +
               "delay 0.2\n" +
-              "set w to front window\n" +
+              "set w to window of t\n" +
               "set tabTty to \"\"\n" +
               "try\n" +
-              "set tabTty to (tty of selected tab of w as string)\n" +
+              "set tabTty to (tty of t as string)\n" +
               "end try\n" +
               "try\n" +
-              "set custom title of selected tab of w to \"" + escapeAppleScriptString(title) + "\"\n" +
+              "set custom title of t to \"" + escapeAppleScriptString(title) + "\"\n" +
               "end try\n" +
               "return (id of w as string) & \"\\t\" & tabTty\n" +
               "end tell";
@@ -348,6 +350,7 @@ final class ManagedServer {
     terminateTerminalTty(tty);
     if ((windowId == null) && (tty == null || tty.isBlank()) && (title == null || title.isBlank())) return;
     if (!isMacOs()) return;
+    String titlePrefix = "SM-" + sanitizeFileToken(name);
 
     try {
       if (windowId != null) {
@@ -393,16 +396,26 @@ final class ManagedServer {
       if (title == null || title.isBlank()) return;
       String byTitleScript =
           "tell application \"Terminal\"\n" +
+              "set targetTitle to \"" + escapeAppleScriptString(title) + "\"\n" +
+              "set closedAny to false\n" +
+              "set keepGoing to true\n" +
+              "repeat while keepGoing\n" +
+              "set keepGoing to false\n" +
               "repeat with w in windows\n" +
               "repeat with t in tabs of w\n" +
-              "if custom title of t is \"" + escapeAppleScriptString(title) + "\" then\n" +
+              "if custom title of t is targetTitle then\n" +
               "try\n" +
               "close w saving no\n" +
               "end try\n" +
-              "return\n" +
+              "set closedAny to true\n" +
+              "set keepGoing to true\n" +
+              "exit repeat\n" +
               "end if\n" +
               "end repeat\n" +
+              "if keepGoing then exit repeat\n" +
               "end repeat\n" +
+              "end repeat\n" +
+              "if closedAny then return \"closed\" else return \"none\"\n" +
               "end tell";
       Process p = new ProcessBuilder("osascript", "-e", byTitleScript).start();
       int exit = p.waitFor();
@@ -412,6 +425,8 @@ final class ManagedServer {
       }
     } catch (Exception ex) {
       log.debug("[{}] failed to close Terminal console window", name, ex);
+    } finally {
+      closeConsoleWindowsByTitlePrefix(titlePrefix);
     }
   }
 
@@ -452,6 +467,69 @@ final class ManagedServer {
       return normalizeTty(out);
     } catch (Exception ignored) {
       return null;
+    }
+  }
+
+  private void closeConsoleWindowsByTitlePrefix(String titlePrefix) {
+    if (!isMacOs() || titlePrefix == null || titlePrefix.isBlank()) return;
+    try {
+      String ttysScript =
+          "tell application \"Terminal\"\n" +
+              "set targetPrefix to \"" + escapeAppleScriptString(titlePrefix) + "\"\n" +
+              "set out to \"\"\n" +
+              "repeat with w in windows\n" +
+              "repeat with t in tabs of w\n" +
+              "set ct to \"\"\n" +
+              "try\n" +
+              "set ct to (custom title of t as string)\n" +
+              "end try\n" +
+              "if ct starts with targetPrefix then\n" +
+              "try\n" +
+              "set out to out & (tty of t as string) & linefeed\n" +
+              "end try\n" +
+              "end if\n" +
+              "end repeat\n" +
+              "end repeat\n" +
+              "return out\n" +
+              "end tell";
+      Process ttys = new ProcessBuilder("osascript", "-e", ttysScript).start();
+      String out = new String(ttys.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      ttys.waitFor();
+      for (String line : out.split("\\R")) {
+        String tty = normalizeTty(line);
+        if (tty != null) {
+          terminateTerminalTty(tty);
+        }
+      }
+
+      String closeScript =
+          "tell application \"Terminal\"\n" +
+              "set targetPrefix to \"" + escapeAppleScriptString(titlePrefix) + "\"\n" +
+              "set keepGoing to true\n" +
+              "repeat while keepGoing\n" +
+              "set keepGoing to false\n" +
+              "repeat with w in windows\n" +
+              "repeat with t in tabs of w\n" +
+              "set ct to \"\"\n" +
+              "try\n" +
+              "set ct to (custom title of t as string)\n" +
+              "end try\n" +
+              "if ct starts with targetPrefix then\n" +
+              "try\n" +
+              "close w saving no\n" +
+              "end try\n" +
+              "set keepGoing to true\n" +
+              "exit repeat\n" +
+              "end if\n" +
+              "end repeat\n" +
+              "if keepGoing then exit repeat\n" +
+              "end repeat\n" +
+              "end repeat\n" +
+              "end tell";
+      Process close = new ProcessBuilder("osascript", "-e", closeScript).start();
+      close.waitFor();
+    } catch (Exception ex) {
+      log.debug("[{}] stale console window cleanup failed", name, ex);
     }
   }
 

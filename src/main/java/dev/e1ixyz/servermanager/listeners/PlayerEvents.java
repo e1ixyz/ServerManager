@@ -14,6 +14,7 @@ import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.player.PlayerChatEvent;
 import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
+import com.velocitypowered.api.event.player.ServerPostConnectEvent;
 import com.velocitypowered.api.event.player.ServerPreConnectEvent;
 import com.velocitypowered.api.event.proxy.ProxyPingEvent;
 import com.velocitypowered.api.proxy.Player;
@@ -510,35 +511,13 @@ public final class PlayerEvents {
     UUID playerId = e.getPlayer().getUniqueId();
     String joined = e.getServer().getServerInfo().getName();
     cancelPendingServerStop(joined);
-    String forcedTarget = resolveManagedForcedHostTarget(e.getPlayer());
-    String reconnectTarget = resolveRecentReconnectTarget(playerId);
-    String preferenceTarget = resolveJoinPreferenceTarget(e.getPlayer());
-    String postJoinRedirectTarget = null;
-    if (e.getPreviousServer().isEmpty()) {
-      if (forcedTarget != null && !forcedTarget.equals(joined) && mgr.isKnown(forcedTarget)) {
-        postJoinRedirectTarget = forcedTarget;
-      } else if (preferenceTarget != null && !preferenceTarget.equals(joined) && mgr.isKnown(preferenceTarget)) {
-        postJoinRedirectTarget = preferenceTarget;
-      } else if (preferenceTarget == null
-          && reconnectTarget != null
-          && !reconnectTarget.equals(joined)
-          && mgr.isKnown(reconnectTarget)) {
-        postJoinRedirectTarget = reconnectTarget;
-      }
-    }
-    boolean shouldResumeReconnect = postJoinRedirectTarget != null;
 
     lastKnownServer.put(playerId, joined);
-    if (!shouldResumeReconnect) {
-      recentDisconnectServer.remove(playerId);
-      recentConnectIntent.remove(playerId);
-    }
+    recentDisconnectServer.remove(playerId);
+    recentConnectIntent.remove(playerId);
     if (mgr.isKnown(joined)) {
       pluginOwner.firePlayerDelivered(playerId, joined);
       runQueuedArrivals(playerId, joined);
-    }
-    if (shouldResumeReconnect) {
-      resumeReconnectFromCurrentServer(e.getPlayer(), postJoinRedirectTarget);
     }
 
     // If they switched from another backend, maybe that one is now empty -> schedule stop for it
@@ -546,6 +525,25 @@ public final class PlayerEvents {
       String prevName = prev.getServerInfo().getName();
       scheduleStopIfServerEmpty(prevName);
     });
+  }
+
+  @Subscribe
+  public void onServerPostConnect(ServerPostConnectEvent e) {
+    if (e.getPreviousServer() != null) {
+      return;
+    }
+
+    Player player = e.getPlayer();
+    String joined = player.getCurrentServer()
+        .map(connection -> connection.getServerInfo().getName())
+        .orElse(null);
+    String redirectTarget = resolvePostJoinRedirectTarget(player, joined);
+    if (redirectTarget == null) {
+      return;
+    }
+
+    log.info("Initial join for {} landed on {}; redirecting to {}", player.getUsername(), joined, redirectTarget);
+    resumeReconnectFromCurrentServer(player, redirectTarget);
   }
 
   @Subscribe
@@ -1376,6 +1374,26 @@ public final class PlayerEvents {
       }
       connectPlayerWhenReady(live, serverName, null);
     }).delay(Duration.ofMillis(100)).schedule();
+  }
+
+  private String resolvePostJoinRedirectTarget(Player player, String joinedServer) {
+    String forcedTarget = resolveManagedForcedHostTarget(player);
+    if (forcedTarget != null && !forcedTarget.equals(joinedServer) && mgr.isKnown(forcedTarget)) {
+      return forcedTarget;
+    }
+
+    String preferenceTarget = resolveJoinPreferenceTarget(player);
+    if (preferenceTarget != null && !preferenceTarget.equals(joinedServer) && mgr.isKnown(preferenceTarget)) {
+      return preferenceTarget;
+    }
+
+    if (preferenceTarget == null) {
+      String reconnectTarget = resolveRecentReconnectTarget(player == null ? null : player.getUniqueId());
+      if (reconnectTarget != null && !reconnectTarget.equals(joinedServer) && mgr.isKnown(reconnectTarget)) {
+        return reconnectTarget;
+      }
+    }
+    return null;
   }
 
   private void flushDeferredBackendCommands(String server) {
