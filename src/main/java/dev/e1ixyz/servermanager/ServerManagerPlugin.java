@@ -98,7 +98,7 @@ public final class ServerManagerPlugin {
       if (processManager != null) {
         processManager.stopAllGracefully();
       }
-      moderation = null;
+      shutdownModeration();
     } catch (Exception ex) {
       logger.error("Error during shutdown stopAll", ex);
     }
@@ -131,6 +131,7 @@ public final class ServerManagerPlugin {
         playerEvents = null;
       }
       proxy.getEventManager().unregisterListeners(this);
+      shutdownModeration();
 
       Config newConfig = Config.loadOrCreateDefault(dataDir.resolve("config.yml"), logger);
       initializeRuntime(newConfig);
@@ -157,6 +158,7 @@ public final class ServerManagerPlugin {
     this.whitelistService = new WhitelistService(newConfig.whitelist, logger, dataDir);
     this.vanillaWhitelist = new VanillaWhitelistChecker(newConfig, logger);
     this.joinPreferences = new JoinPreferenceService(logger, dataDir);
+    shutdownModeration();
     this.moderation = new ModerationService(newConfig.moderation, logger, dataDir);
     this.whitelistHttpServer = new WhitelistHttpServer(newConfig.whitelist, logger, whitelistService);
     this.whitelistHttpServer.start();
@@ -343,6 +345,19 @@ public final class ServerManagerPlugin {
       cm.register(cm.metaBuilder("mutelist").plugin(this).build(), moderationCommands);
     } else {
       moderationCommands.updateState(config, moderation, whitelistService);
+    }
+  }
+
+  private synchronized void shutdownModeration() {
+    if (moderation == null) {
+      return;
+    }
+    try {
+      moderation.shutdown();
+    } catch (Exception ex) {
+      logger.warn("Failed to shutdown moderation service cleanly", ex);
+    } finally {
+      moderation = null;
     }
   }
 }

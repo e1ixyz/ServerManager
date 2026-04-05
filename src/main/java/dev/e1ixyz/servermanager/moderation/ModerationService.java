@@ -12,7 +12,10 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class ModerationService {
   public enum Type { BAN, STEALTH_BAN, IPBAN, MUTE }
@@ -25,6 +28,9 @@ public final class ModerationService {
   private final Map<UUID, Entry> bansByUuid = new ConcurrentHashMap<>();
   private final Map<String, Entry> bansByIp = new ConcurrentHashMap<>();
   private final Map<UUID, Entry> mutesByUuid = new ConcurrentHashMap<>();
+  private final ExecutorService persistExecutor;
+  private final AtomicBoolean persistQueued = new AtomicBoolean(false);
+  private final AtomicBoolean persistDirty = new AtomicBoolean(false);
 
   public ModerationService(Config.Moderation cfg, Logger log, Path dataDir) throws IOException {
     this.cfg = cfg;
@@ -32,6 +38,11 @@ public final class ModerationService {
     this.dataFile = dataDir.resolve(cfg.dataFile == null || cfg.dataFile.isBlank()
         ? "moderation.yml"
         : cfg.dataFile).normalize();
+    this.persistExecutor = Executors.newSingleThreadExecutor(r -> {
+      Thread t = new Thread(r, "sm-moderation-persist");
+      t.setDaemon(true);
+      return t;
+    });
     load();
   }
 
@@ -64,16 +75,17 @@ public final class ModerationService {
     synchronized (this) {
       bansByIp.put(normalized, e);
     }
-    CompletableFuture.runAsync(() -> {
-      synchronized (this) {
-        try {
-          persist();
-        } catch (IOException ex) {
-          log.error("Failed to persist auto-ban {}", normalized, ex);
-        }
-      }
-    });
+    schedulePersistAsync();
     return e;
+  }
+
+  public void shutdown() {
+    persistExecutor.shutdown();
+    try {
+      persistExecutor.awaitTermination(2, TimeUnit.SECONDS);
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   public synchronized boolean unban(UUID uuid, String ip) throws IOException {
@@ -205,6 +217,29 @@ public final class ModerationService {
     String yamlStr = yaml.dump(rows);
     if (dataFile.getParent() != null) Files.createDirectories(dataFile.getParent());
     Files.writeString(dataFile, yamlStr, StandardCharsets.UTF_8);
+  }
+
+  private void schedulePersistAsync() {
+    persistDirty.set(true);
+    if (!persistQueued.compareAndSet(false, true)) {
+      return;
+    }
+    persistExecutor.execute(() -> {
+      try {
+        while (persistDirty.getAndSet(false)) {
+          synchronized (this) {
+            persist();
+          }
+        }
+      } catch (IOException ex) {
+        log.error("Failed to persist moderation data", ex);
+      } finally {
+        persistQueued.set(false);
+        if (persistDirty.get()) {
+          schedulePersistAsync();
+        }
+      }
+    });
   }
 
   private Map<String, Object> toMap(Entry e) {

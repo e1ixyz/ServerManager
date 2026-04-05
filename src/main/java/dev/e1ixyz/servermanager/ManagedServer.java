@@ -286,16 +286,19 @@ final class ManagedServer {
           "tell application \"Terminal\"\n" +
               "activate\n" +
               "set t to do script \"" + escapeAppleScriptString(terminalCommand) + "\"\n" +
-              "delay 0.2\n" +
-              "set w to window of t\n" +
+              "delay 0.35\n" +
               "set tabTty to \"\"\n" +
+              "set windowId to \"\"\n" +
               "try\n" +
               "set tabTty to (tty of t as string)\n" +
               "end try\n" +
               "try\n" +
               "set custom title of t to \"" + escapeAppleScriptString(title) + "\"\n" +
               "end try\n" +
-              "return (id of w as string) & \"\\t\" & tabTty\n" +
+              "try\n" +
+              "set windowId to (id of front window as string)\n" +
+              "end try\n" +
+              "return windowId & \"\\t\" & tabTty\n" +
               "end tell";
 
       Process p = new ProcessBuilder("osascript", "-e", appleScript).start();
@@ -320,9 +323,6 @@ final class ManagedServer {
           if (parts.length > 1) {
             tty = normalizeTty(parts[1]);
           }
-        }
-        if (externalConsoleWindowId == null) {
-          externalConsoleWindowId = null;
         }
         if (tty == null || tty.isBlank()) {
           tty = resolveTerminalTtyByTitle(title);
