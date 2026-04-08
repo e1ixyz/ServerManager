@@ -20,6 +20,7 @@ dev/e1ixyz/servermanager/whitelist/WhitelistService$RedeemResult.class
 dev/e1ixyz/servermanager/commands/StopCmd.class
 dev/e1ixyz/servermanager/Config$AutoIpBan.class
 dev/e1ixyz/servermanager/Config$AutoThresholds.class
+dev/e1ixyz/servermanager/ManagedServer$AppleScriptResult.class
 dev/e1ixyz/servermanager/Config$Threshold.class
 dev/e1ixyz/servermanager/moderation/ModerationService$Entry.class
 dev/e1ixyz/servermanager/listeners/PlayerEvents$RestartSchedule.class
