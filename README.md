@@ -15,7 +15,7 @@ Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist beha
 - Admin hold command (`/sm hold`) keeps a backend online for a set window even when it is empty.
 - Admin `/sm updateplugins` workflow starts a waiting server, moves everyone there, restarts the target backend, then returns everyone once it is ping-ready again.
 - Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
-- Optional macOS per-server Terminal tabs (`openConsoleWindow`) for live backend logs plus command input forwarding.
+- Optional macOS per-server Terminal windows (`openConsoleWindow`) for live backend logs plus command input forwarding.
 - Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve web onboarding.
 - Built-in moderation: `/ban`, `/stealthban`, `/ipban`, `/unban`, `/mute`, `/unmute`, `/warn`, plus `/banlist` and `/mutelist`. Banned players are blocked at login so they cannot start backends.
 - In-game `/sm whitelist` tooling to view/add/remove entries from both the network whitelist and any managed vanilla `whitelist.json`.
@@ -193,7 +193,7 @@ Key points:
 - `startCommand` executes inside `workingDir`. Include `nogui` if you do not want the vanilla GUI.
 - `stopCommand` is written to the server stdin during graceful shutdown (`stop` for Paper).
 - If `logToFile` is true, stdout/stderr is redirected to `logFile`. Paths are resolved relative to `workingDir` when not absolute.
-- `openConsoleWindow: true` (macOS only) opens a dedicated Terminal tab for that backend while it is running; typed lines are forwarded to backend stdin. Requires `logToFile: true`.
+- `openConsoleWindow: true` (macOS only) opens a dedicated Terminal window for that backend while it is running; typed lines are forwarded to backend stdin. Requires `logToFile: true`.
 - Each server entry may set `vanillaWhitelistBypassesNetwork` to grant players on that backend's `whitelist.json` access to the network whitelist automatically, and `mirrorNetworkWhitelist` to push every accepted player back into that backend's vanilla whitelist (including via `/whitelist add` while it is online). When omitted, the primary server keeps the legacy behavior (bypass + mirror) and other servers remain opt-in.
 - Live vanilla whitelist console updates are now held until the backend responds to ping; file updates always happen immediately so offline servers still apply changes on next boot.
 - `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
@@ -326,9 +326,9 @@ Permissions: `servermanager.moderation.ban`, `.stealthban`, `.ipban`, `.unban`, 
 - When `logToFile` is enabled, backend stdout/stderr is piped to the configured file and not echoed to the proxy console.
 
 ## External Console Windows (macOS)
-- Set `openConsoleWindow: true` on a server to open a dedicated Terminal tab when that backend starts.
-- The tab shows a live tail of the configured `logFile` and accepts input; each entered line is forwarded to backend stdin.
-- Tabs are closed automatically when ServerManager observes the backend stop/exit.
+- Set `openConsoleWindow: true` on a server to open a dedicated Terminal window when that backend starts.
+- The window shows a live tail of the configured `logFile` and accepts input; each entered line is forwarded to backend stdin.
+- Windows are closed automatically when ServerManager observes the backend stop/exit.
 - `openConsoleWindow` requires `logToFile: true`.
 - This feature is macOS Terminal only. On other OSes, ServerManager logs a warning and skips opening windows.
 
@@ -338,7 +338,7 @@ Permissions: `servermanager.moderation.ban`, `.stealthban`, `.ipban`, `.unban`, 
 - **Player stuck waiting**: Check backend logs for boot errors. If the process starts but never replies to pings, the auto-connect poller will eventually time out.
 - **Backends never stop**: Confirm `stopGraceSeconds` is set, that players actually disconnect, no admin hold is active, and that the stop command is correct. A background sweep now re-schedules stops for empty-but-running backends, so persistent stragglers will log a warning in the Velocity console (especially when `logToFile` is disabled).
 - **Held server restarted while proxy was shutting down**: Update to the latest build. Shutdown now blocks new starts and cancels hold restart scheduling during teardown.
-- **Console tab opens but cannot send commands**: Ensure `openConsoleWindow: true` and `logToFile: true` are both set for that server, then restart Velocity with the latest plugin build.
+- **Console window opens but cannot send commands**: Ensure `openConsoleWindow: true` and `logToFile: true` are both set for that server, then restart Velocity with the latest plugin build.
 
 ## Development Notes
 - `ServerManagerPlugin` handles lifecycle wiring, configuration migration, and command registration.

@@ -6,6 +6,10 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 final class ManagedServer {
   private final String name;
@@ -15,7 +19,7 @@ final class ManagedServer {
   private volatile Process process;
   private volatile boolean starting;
   private volatile long lastStartMs = 0L;
-  private volatile Long externalConsoleWindowId;
+  private volatile long lifecycleGeneration = 0L;
   private volatile String externalConsoleTty;
   private volatile String externalConsoleTitle;
   private volatile File externalConsoleCommandFile;
@@ -46,6 +50,7 @@ final class ManagedServer {
 
     starting = true;
     try {
+      long generation = ++lifecycleGeneration;
       ProcessBuilder pb = shellCommand(snapshot.startCommand);
       pb.directory(new File(snapshot.workingDir));
       pb.redirectErrorStream(true);
@@ -85,7 +90,7 @@ final class ManagedServer {
       if (Boolean.TRUE.equals(snapshot.openConsoleWindow)) {
         commandSpoolFile = resolveConsoleCommandFile(snapshot, logOutputFile);
         startExternalConsoleCommandPump(started, commandSpoolFile);
-        openExternalConsoleWindow(snapshot, started.pid(), logOutputFile, commandSpoolFile);
+        openExternalConsoleWindow(snapshot, started.pid(), generation, logOutputFile, commandSpoolFile);
       }
       Thread watcher = new Thread(() -> {
         try {
@@ -93,7 +98,7 @@ final class ManagedServer {
         } catch (InterruptedException ignored) {
           Thread.currentThread().interrupt();
         } finally {
-          closeExternalConsoleWindow();
+          closeExternalConsoleWindow(generation);
         }
       }, "ms-exit-" + name);
       watcher.setDaemon(true);
@@ -106,28 +111,32 @@ final class ManagedServer {
   }
 
   synchronized void stopGracefully() {
+    Process current = process;
+    long generation = lifecycleGeneration;
     if (!isRunning()) {
-      closeExternalConsoleWindow();
+      closeExternalConsoleWindow(generation);
       return;
     }
     try {
-      OutputStream os = process.getOutputStream();
+      OutputStream os = current.getOutputStream();
       ServerConfig snapshot = this.cfg;
       os.write((snapshot.stopCommand + System.lineSeparator()).getBytes(StandardCharsets.UTF_8));
       os.flush();
       log.info("[{}] sent stop command", name);
 
-      if (!process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) {
+      if (!current.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) {
         log.warn("[{}] did not exit in time; destroying forcibly", name);
-        process.destroyForcibly();
+        current.destroyForcibly();
       }
     } catch (Exception ex) {
       log.error("[{}] error during stop", name, ex);
-      process.destroyForcibly();
+      if (current != null) current.destroyForcibly();
     } finally {
-      process = null;
+      if (process == current) {
+        process = null;
+      }
       starting = false;
-      closeExternalConsoleWindow();
+      closeExternalConsoleWindow(generation);
     }
   }
 
@@ -183,7 +192,6 @@ final class ManagedServer {
 
   private void startExternalConsoleCommandPump(Process serverProcess, File commandSpoolFile) {
     if (commandSpoolFile == null) return;
-    this.externalConsoleCommandFile = commandSpoolFile;
     Thread t = new Thread(() -> {
       long pointer = 0L;
       while (serverProcess.isAlive()) {
@@ -218,9 +226,7 @@ final class ManagedServer {
   }
 
   private synchronized void openExternalConsoleWindow(
-      ServerConfig snapshot, long serverPid, File logOutputFile, File commandSpoolFile) {
-    closeExternalConsoleWindow();
-
+      ServerConfig snapshot, long serverPid, long generation, File logOutputFile, File commandSpoolFile) {
     if (!isMacOs()) {
       log.warn("[{}] openConsoleWindow is enabled but only supported on macOS.", name);
       return;
@@ -253,90 +259,59 @@ final class ManagedServer {
             "printf '%s\\n' \"$LINE\" >> \"$CMD\"; " +
             "fi; " +
             "done; ";
-      String closeWindowScript =
-          "tell application \"Terminal\"\n" +
-              "repeat with w in windows\n" +
-              "repeat with t in tabs of w\n" +
-              "if custom title of t is \"" + escapeAppleScriptString(title) + "\" then\n" +
-              "try\n" +
-              "close w saving no\n" +
-              "end try\n" +
-              "return\n" +
-              "end if\n" +
-              "end repeat\n" +
-              "end repeat\n" +
-              "end tell";
       String monitorScript =
           "printf '\\033]0;" + title + "\\007'; " +
-              "TITLE=" + shQuote(title) + "; " +
               "LOG=" + shQuote(logPath) + "; " +
               "PID=" + serverPid + "; " +
-              "SELF_TTY=$(tty 2>/dev/null || true); " +
-              "SELF_TTY_SHORT=${SELF_TTY##*/}; " +
               "touch \"$LOG\"; " +
               commandInit +
-              "tail -n 200 -f \"$LOG\" & TAIL_PID=$!; " +
+              "tail -n 200 -F \"$LOG\" & TAIL_PID=$!; " +
               inputLoop +
               "kill \"$TAIL_PID\" >/dev/null 2>&1; " +
               "wait \"$TAIL_PID\" 2>/dev/null; " +
-              "nohup sh -c " + shQuote("sleep 1; osascript -e " + shQuote(closeWindowScript) + " >/dev/null 2>&1") + " >/dev/null 2>&1 & " +
               "exit";
       String terminalCommand = "exec bash -lc " + shQuote(monitorScript);
       String appleScript =
           "tell application \"Terminal\"\n" +
               "activate\n" +
               "set t to do script \"" + escapeAppleScriptString(terminalCommand) + "\"\n" +
-              "delay 0.35\n" +
               "set tabTty to \"\"\n" +
-              "set windowId to \"\"\n" +
-              "try\n" +
-              "set tabTty to (tty of t as string)\n" +
-              "end try\n" +
+              "repeat 10 times\n" +
+              "delay 0.1\n" +
               "try\n" +
               "set custom title of t to \"" + escapeAppleScriptString(title) + "\"\n" +
               "end try\n" +
               "try\n" +
-              "set windowId to (id of front window as string)\n" +
+              "set tabTty to (tty of t as string)\n" +
+              "if tabTty is not \"\" then exit repeat\n" +
               "end try\n" +
-              "return windowId & \"\\t\" & tabTty\n" +
+              "end repeat\n" +
+              "return tabTty\n" +
               "end tell";
 
-      Process p = new ProcessBuilder("osascript", "-e", appleScript).start();
-      String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-      String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-      int exit = p.waitFor();
-      if (exit != 0) {
-        log.warn("[{}] failed to open Terminal console window: {}", name, err.isBlank() ? "osascript failed" : err);
-        externalConsoleTitle = null;
-        externalConsoleWindowId = null;
+      AppleScriptResult result = runAppleScript(appleScript);
+      if (result.exitCode != 0) {
+        log.warn("[{}] failed to open Terminal console window: {}", name,
+            result.stderr.isBlank() ? "osascript failed" : result.stderr);
         externalConsoleTty = null;
       } else {
-        String tty = null;
-        if (!out.isBlank()) {
-          String[] parts = out.split("\\t", 2);
-          String idPart = parts[0].trim();
-          try {
-            externalConsoleWindowId = Long.parseLong(idPart);
-          } catch (NumberFormatException ignored) {
-            externalConsoleWindowId = null;
-          }
-          if (parts.length > 1) {
-            tty = normalizeTty(parts[1]);
-          }
-        }
+        String tty = normalizeTty(result.stdout);
         if (tty == null || tty.isBlank()) {
           tty = resolveTerminalTtyByTitle(title);
         }
-        externalConsoleTty = normalizeTty(tty);
+        if (generation == lifecycleGeneration) {
+          externalConsoleTty = normalizeTty(tty);
+        }
       }
     } catch (Exception ex) {
       log.warn("[{}] failed to open Terminal console window", name, ex);
     }
   }
 
-  private synchronized void closeExternalConsoleWindow() {
-    Long windowId = externalConsoleWindowId;
-    externalConsoleWindowId = null;
+  private synchronized void closeExternalConsoleWindow(long expectedGeneration) {
+    if (expectedGeneration != 0L && lifecycleGeneration != expectedGeneration) {
+      return;
+    }
     String tty = externalConsoleTty;
     externalConsoleTty = null;
     String title = externalConsoleTitle;
@@ -344,89 +319,23 @@ final class ManagedServer {
     File commandFile = externalConsoleCommandFile;
     externalConsoleCommandFile = null;
     truncateCommandSpool(commandFile);
-    if (tty == null || tty.isBlank()) {
-      tty = resolveTerminalTtyByTitle(title);
-    }
-    terminateTerminalTty(tty);
-    if ((windowId == null) && (tty == null || tty.isBlank()) && (title == null || title.isBlank())) return;
+    if ((tty == null || tty.isBlank()) && (title == null || title.isBlank())) return;
     if (!isMacOs()) return;
     String titlePrefix = "SM-" + sanitizeFileToken(name);
 
     try {
-      if (windowId != null) {
-        String byWindowScript =
-            "tell application \"Terminal\"\n" +
-                "repeat with w in windows\n" +
-                "if id of w is " + windowId + " then\n" +
-                "try\n" +
-                "close w saving no\n" +
-                "end try\n" +
-                "return\n" +
-                "end if\n" +
-                "end repeat\n" +
-                "end tell";
-        Process p = new ProcessBuilder("osascript", "-e", byWindowScript).start();
-        int exit = p.waitFor();
-        if (exit != 0) {
-          String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-          log.warn("[{}] failed to close console window {}: {}", name, windowId, err.isBlank() ? "osascript failed" : err);
-        }
+      if ((tty == null || tty.isBlank()) && title != null && !title.isBlank()) {
+        tty = resolveTerminalTtyByTitle(title);
       }
       if (tty != null && !tty.isBlank()) {
-        String byTtyScript =
-            "tell application \"Terminal\"\n" +
-                "repeat with w in windows\n" +
-                "repeat with t in tabs of w\n" +
-                "if (tty of t as text) is \"" + escapeAppleScriptString(tty) + "\" then\n" +
-                "try\n" +
-                "close w saving no\n" +
-                "end try\n" +
-                "return\n" +
-                "end if\n" +
-                "end repeat\n" +
-                "end repeat\n" +
-                "end tell";
-        Process p = new ProcessBuilder("osascript", "-e", byTtyScript).start();
-        int exit = p.waitFor();
-        if (exit != 0) {
-          String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-          log.warn("[{}] failed to close console window by tty {}: {}", name, tty, err.isBlank() ? "osascript failed" : err);
-        }
+        terminateTerminalTty(tty);
+        Thread.sleep(100L);
       }
-      if (title == null || title.isBlank()) return;
-      String byTitleScript =
-          "tell application \"Terminal\"\n" +
-              "set targetTitle to \"" + escapeAppleScriptString(title) + "\"\n" +
-              "set closedAny to false\n" +
-              "set keepGoing to true\n" +
-              "repeat while keepGoing\n" +
-              "set keepGoing to false\n" +
-              "repeat with w in windows\n" +
-              "repeat with t in tabs of w\n" +
-              "if custom title of t is targetTitle then\n" +
-              "try\n" +
-              "close w saving no\n" +
-              "end try\n" +
-              "set closedAny to true\n" +
-              "set keepGoing to true\n" +
-              "exit repeat\n" +
-              "end if\n" +
-              "end repeat\n" +
-              "if keepGoing then exit repeat\n" +
-              "end repeat\n" +
-              "end repeat\n" +
-              "if closedAny then return \"closed\" else return \"none\"\n" +
-              "end tell";
-      Process p = new ProcessBuilder("osascript", "-e", byTitleScript).start();
-      int exit = p.waitFor();
-      if (exit != 0) {
-        String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-        log.warn("[{}] failed to close console window by title '{}': {}", name, title, err.isBlank() ? "osascript failed" : err);
-      }
+      boolean closedByTitle = title != null && !title.isBlank() && closeConsoleWindowByTitle(title);
+      boolean clearedByPrefix = closeConsoleWindowsByTitlePrefix(titlePrefix);
+      if (!closedByTitle && !clearedByPrefix) terminateTerminalTty(tty);
     } catch (Exception ex) {
       log.debug("[{}] failed to close Terminal console window", name, ex);
-    } finally {
-      closeConsoleWindowsByTitlePrefix(titlePrefix);
     }
   }
 
@@ -461,17 +370,171 @@ final class ManagedServer {
               "end repeat\n" +
               "end repeat\n" +
               "end tell";
-      Process p = new ProcessBuilder("osascript", "-e", script).start();
-      String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-      p.waitFor();
-      return normalizeTty(out);
-    } catch (Exception ignored) {
+      AppleScriptResult result = runAppleScript(script);
+      if (result.exitCode != 0) {
+        log.debug("[{}] failed to resolve console tty for '{}': {}", name, title,
+            result.stderr.isBlank() ? "osascript failed" : result.stderr);
+        return null;
+      }
+      return normalizeTty(result.stdout);
+    } catch (Exception ex) {
+      log.debug("[{}] failed to resolve console tty for '{}'", name, title, ex);
       return null;
     }
   }
 
-  private void closeConsoleWindowsByTitlePrefix(String titlePrefix) {
-    if (!isMacOs() || titlePrefix == null || titlePrefix.isBlank()) return;
+  private boolean closeConsoleWindowByTitle(String title) {
+    if (!isMacOs() || title == null || title.isBlank()) return false;
+    try {
+      String byTitleScript =
+          "tell application \"Terminal\"\n" +
+              "set targetTitle to \"" + escapeAppleScriptString(title) + "\"\n" +
+              "set targetId to \"\"\n" +
+              "repeat with w in windows\n" +
+              "repeat with t in tabs of w\n" +
+              "if custom title of t is targetTitle then\n" +
+              "try\n" +
+              "set targetId to (id of w as string)\n" +
+              "end try\n" +
+              "exit repeat\n" +
+              "end if\n" +
+              "end repeat\n" +
+              "if targetId is not \"\" then exit repeat\n" +
+              "end repeat\n" +
+              "if targetId is not \"\" then\n" +
+              "try\n" +
+              "close (first window whose id is (targetId as integer)) saving no\n" +
+              "return \"closed\"\n" +
+              "end try\n" +
+              "end if\n" +
+              "return \"none\"\n" +
+              "end tell";
+      AppleScriptResult result = runAppleScript(byTitleScript);
+      if (result.exitCode != 0) {
+        log.warn("[{}] failed to close console window by title '{}': {}", name, title,
+            result.stderr.isBlank() ? "osascript failed" : result.stderr);
+        return false;
+      }
+      if (!"closed".equalsIgnoreCase(result.stdout)) {
+        return false;
+      }
+      Thread.sleep(75L);
+      return !hasConsoleWindowWithTitle(title);
+    } catch (Exception ex) {
+      log.debug("[{}] failed to close console window by title '{}'", name, title, ex);
+      return false;
+    }
+  }
+
+  private boolean closeConsoleWindowsByTitlePrefix(String titlePrefix) {
+    if (!isMacOs() || titlePrefix == null || titlePrefix.isBlank()) return false;
+    try {
+      List<String> titles = listConsoleTitlesByPrefix(titlePrefix);
+      if (titles.isEmpty()) return false;
+      for (String tty : listTerminalTtysByTitlePrefix(titlePrefix)) {
+        terminateTerminalTty(tty);
+      }
+      Thread.sleep(100L);
+      int passes = 0;
+      while (!titles.isEmpty() && passes < 6) {
+        for (String title : titles) {
+          closeConsoleWindowByTitle(title);
+          Thread.sleep(75L);
+        }
+        titles = listConsoleTitlesByPrefix(titlePrefix);
+        passes++;
+      }
+      if (!titles.isEmpty()) {
+        for (String tty : listTerminalTtysByTitlePrefix(titlePrefix)) {
+          terminateTerminalTty(tty);
+        }
+        Thread.sleep(100L);
+        passes = 0;
+        while (!titles.isEmpty() && passes < 6) {
+          for (String title : titles) {
+            closeConsoleWindowByTitle(title);
+            Thread.sleep(75L);
+          }
+          titles = listConsoleTitlesByPrefix(titlePrefix);
+          passes++;
+        }
+      }
+      return titles.isEmpty();
+    } catch (Exception ex) {
+      log.debug("[{}] stale console window cleanup failed", name, ex);
+      return false;
+    }
+  }
+
+  private List<String> listConsoleTitlesByPrefix(String titlePrefix) {
+    if (!isMacOs() || titlePrefix == null || titlePrefix.isBlank()) return List.of();
+    try {
+      String script =
+          "tell application \"Terminal\"\n" +
+              "set targetPrefix to \"" + escapeAppleScriptString(titlePrefix) + "\"\n" +
+              "set out to \"\"\n" +
+              "repeat with w in windows\n" +
+              "repeat with t in tabs of w\n" +
+              "set ct to \"\"\n" +
+              "try\n" +
+              "set ct to (custom title of t as string)\n" +
+              "end try\n" +
+              "if ct starts with targetPrefix then set out to out & ct & linefeed\n" +
+              "end repeat\n" +
+              "end repeat\n" +
+              "return out\n" +
+              "end tell";
+      AppleScriptResult result = runAppleScript(script);
+      if (result.exitCode != 0) {
+        log.warn("[{}] failed to inspect console window titles for prefix '{}': {}", name, titlePrefix,
+            result.stderr.isBlank() ? "osascript failed" : result.stderr);
+        return List.of();
+      }
+      LinkedHashSet<String> titles = new LinkedHashSet<>();
+      for (String line : result.stdout.split("\\R")) {
+        String title = line == null ? null : line.trim();
+        if (title != null && !title.isEmpty()) titles.add(title);
+      }
+      return new ArrayList<>(titles);
+    } catch (Exception ex) {
+      log.debug("[{}] failed to inspect console window titles for prefix '{}'", name, titlePrefix, ex);
+      return List.of();
+    }
+  }
+
+  private boolean hasConsoleWindowWithTitle(String title) {
+    if (!isMacOs() || title == null || title.isBlank()) return false;
+    try {
+      String script =
+          "tell application \"Terminal\"\n" +
+              "set targetTitle to \"" + escapeAppleScriptString(title) + "\"\n" +
+              "set matches to 0\n" +
+              "repeat with w in windows\n" +
+              "repeat with t in tabs of w\n" +
+              "set ct to \"\"\n" +
+              "try\n" +
+              "set ct to (custom title of t as string)\n" +
+              "end try\n" +
+              "if ct is targetTitle then set matches to matches + 1\n" +
+              "end repeat\n" +
+              "end repeat\n" +
+              "return matches\n" +
+              "end tell";
+      AppleScriptResult result = runAppleScript(script);
+      if (result.exitCode != 0) {
+        log.warn("[{}] failed to inspect console window title '{}': {}", name, title,
+            result.stderr.isBlank() ? "osascript failed" : result.stderr);
+        return false;
+      }
+      return !result.stdout.isBlank() && !"0".equals(result.stdout);
+    } catch (Exception ex) {
+      log.debug("[{}] failed to inspect console window title '{}'", name, title, ex);
+      return false;
+    }
+  }
+
+  private List<String> listTerminalTtysByTitlePrefix(String titlePrefix) {
+    if (!isMacOs() || titlePrefix == null || titlePrefix.isBlank()) return List.of();
     try {
       String ttysScript =
           "tell application \"Terminal\"\n" +
@@ -492,44 +555,41 @@ final class ManagedServer {
               "end repeat\n" +
               "return out\n" +
               "end tell";
-      Process ttys = new ProcessBuilder("osascript", "-e", ttysScript).start();
-      String out = new String(ttys.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-      ttys.waitFor();
-      for (String line : out.split("\\R")) {
-        String tty = normalizeTty(line);
-        if (tty != null) {
-          terminateTerminalTty(tty);
-        }
+      AppleScriptResult result = runAppleScript(ttysScript);
+      if (result.exitCode != 0) {
+        log.warn("[{}] failed to inspect console windows with prefix '{}': {}", name, titlePrefix,
+            result.stderr.isBlank() ? "osascript failed" : result.stderr);
+        return List.of();
       }
-
-      String closeScript =
-          "tell application \"Terminal\"\n" +
-              "set targetPrefix to \"" + escapeAppleScriptString(titlePrefix) + "\"\n" +
-              "set keepGoing to true\n" +
-              "repeat while keepGoing\n" +
-              "set keepGoing to false\n" +
-              "repeat with w in windows\n" +
-              "repeat with t in tabs of w\n" +
-              "set ct to \"\"\n" +
-              "try\n" +
-              "set ct to (custom title of t as string)\n" +
-              "end try\n" +
-              "if ct starts with targetPrefix then\n" +
-              "try\n" +
-              "close w saving no\n" +
-              "end try\n" +
-              "set keepGoing to true\n" +
-              "exit repeat\n" +
-              "end if\n" +
-              "end repeat\n" +
-              "if keepGoing then exit repeat\n" +
-              "end repeat\n" +
-              "end repeat\n" +
-              "end tell";
-      Process close = new ProcessBuilder("osascript", "-e", closeScript).start();
-      close.waitFor();
+      LinkedHashSet<String> ttys = new LinkedHashSet<>();
+      for (String line : result.stdout.split("\\R")) {
+        String tty = normalizeTty(line);
+        if (tty != null) ttys.add(tty);
+      }
+      return new ArrayList<>(ttys);
     } catch (Exception ex) {
-      log.debug("[{}] stale console window cleanup failed", name, ex);
+      log.debug("[{}] failed to inspect console windows with prefix '{}'", name, titlePrefix, ex);
+      return List.of();
+    }
+  }
+
+  private AppleScriptResult runAppleScript(String script) throws IOException, InterruptedException {
+    Process process = new ProcessBuilder("osascript", "-e", script).start();
+    String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+    String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+    int exitCode = process.waitFor();
+    return new AppleScriptResult(exitCode, stdout, stderr);
+  }
+
+  private static final class AppleScriptResult {
+    private final int exitCode;
+    private final String stdout;
+    private final String stderr;
+
+    private AppleScriptResult(int exitCode, String stdout, String stderr) {
+      this.exitCode = exitCode;
+      this.stdout = stdout;
+      this.stderr = stderr;
     }
   }
 
@@ -538,13 +598,55 @@ final class ManagedServer {
     String normalized = normalizeTty(tty);
     if (normalized == null || normalized.isBlank()) return;
     String shortTty = normalized.startsWith("/dev/") ? normalized.substring(5) : normalized;
-    String cmd = "pkill -TERM -t " + shQuote(shortTty) + " >/dev/null 2>&1 || true; " +
-        "sleep 0.25; " +
-        "pkill -KILL -t " + shQuote(shortTty) + " >/dev/null 2>&1 || true";
     try {
-      Process p = new ProcessBuilder("sh", "-lc", cmd).start();
-      p.waitFor();
-    } catch (Exception ignored) {
+      List<Long> pids = listTerminalProcessIds(shortTty);
+      if (pids.isEmpty()) return;
+      for (Long pid : pids) {
+        ProcessHandle.of(pid).ifPresent(ProcessHandle::destroy);
+      }
+      Thread.sleep(250L);
+
+      List<Long> survivors = listTerminalProcessIds(shortTty);
+      for (Long pid : survivors) {
+        ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+      }
+      Thread.sleep(250L);
+    } catch (Exception ex) {
+      log.debug("[{}] failed to terminate tty {}", name, shortTty, ex);
+    }
+  }
+
+  private List<Long> listTerminalProcessIds(String shortTty) {
+    if (shortTty == null || shortTty.isBlank()) return List.of();
+    try {
+      Process process = new ProcessBuilder("ps", "-t", shortTty, "-o", "pid=").start();
+      String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+      boolean finished = process.waitFor(2, TimeUnit.SECONDS);
+      if (!finished) {
+        process.destroyForcibly();
+        return List.of();
+      }
+      int exit = process.exitValue();
+      if (exit != 0) {
+        if (!stderr.isBlank() && !stderr.contains("No such file or directory")) {
+          log.debug("[{}] failed to inspect tty {}: {}", name, shortTty, stderr);
+        }
+        return List.of();
+      }
+      List<Long> pids = new ArrayList<>();
+      for (String line : stdout.split("\\R")) {
+        String trimmed = line == null ? "" : line.trim();
+        if (trimmed.isEmpty()) continue;
+        try {
+          pids.add(Long.parseLong(trimmed));
+        } catch (NumberFormatException ignored) {
+        }
+      }
+      return pids;
+    } catch (Exception ex) {
+      log.debug("[{}] failed to inspect tty {}", name, shortTty, ex);
+      return List.of();
     }
   }
 
