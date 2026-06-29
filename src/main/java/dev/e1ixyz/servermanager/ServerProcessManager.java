@@ -8,9 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class ServerProcessManager {
-  private final Map<String, ManagedServer> servers = new HashMap<>();
+  // ConcurrentHashMap: read by unsynchronized isRunning/isAnyRunning/isKnown while reload() mutates it
+  private final Map<String, ManagedServer> servers = new ConcurrentHashMap<>();
   private final Map<String, Long> holdUntilMs = new HashMap<>();
   private volatile Config cfg;
   private final Logger log;

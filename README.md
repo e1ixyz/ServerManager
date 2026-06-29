@@ -344,4 +344,4 @@ Permissions: `servermanager.moderation.ban`, `.stealthban`, `.ipban`, `.unban`, 
 - `ServerManagerPlugin` handles lifecycle wiring, configuration migration, and command registration.
 - `ServerProcessManager` and `ManagedServer` encapsulate per-server process control.
 - `PlayerEvents` orchestrates player flow, MOTD updates, start queues, and shutdown scheduling.
-- The project targets Java 17 and shades its dependencies; keep that baseline when contributing.
+- The project targets Java 17. SnakeYAML is shaded and relocated into `dev.e1ixyz.servermanager.lib.snakeyaml`; MiniMessage/Adventure are `provided` by Velocity at runtime (do not shade them). Keep that baseline when contributing.

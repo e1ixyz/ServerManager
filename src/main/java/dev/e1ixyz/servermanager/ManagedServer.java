@@ -31,7 +31,8 @@ final class ManagedServer {
   }
 
   boolean isRunning() {
-    return process != null && process.isAlive();
+    Process p = process; // snapshot: stopGracefully() may null it between checks
+    return p != null && p.isAlive();
   }
 
   boolean recentlyStarted(long windowMs) {
@@ -575,10 +576,14 @@ final class ManagedServer {
 
   private AppleScriptResult runAppleScript(String script) throws IOException, InterruptedException {
     Process process = new ProcessBuilder("osascript", "-e", script).start();
-    String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-    String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-    int exitCode = process.waitFor();
-    return new AppleScriptResult(exitCode, stdout, stderr);
+    try {
+      String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+      String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+      int exitCode = process.waitFor();
+      return new AppleScriptResult(exitCode, stdout, stderr);
+    } finally {
+      if (process.isAlive()) process.destroyForcibly();
+    }
   }
 
   private static final class AppleScriptResult {
@@ -618,13 +623,13 @@ final class ManagedServer {
 
   private List<Long> listTerminalProcessIds(String shortTty) {
     if (shortTty == null || shortTty.isBlank()) return List.of();
+    Process process = null;
     try {
-      Process process = new ProcessBuilder("ps", "-t", shortTty, "-o", "pid=").start();
+      process = new ProcessBuilder("ps", "-t", shortTty, "-o", "pid=").start();
       String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
       String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
       boolean finished = process.waitFor(2, TimeUnit.SECONDS);
       if (!finished) {
-        process.destroyForcibly();
         return List.of();
       }
       int exit = process.exitValue();
@@ -647,6 +652,8 @@ final class ManagedServer {
     } catch (Exception ex) {
       log.debug("[{}] failed to inspect tty {}", name, shortTty, ex);
       return List.of();
+    } finally {
+      if (process != null && process.isAlive()) process.destroyForcibly();
     }
   }
 
