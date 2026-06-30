@@ -74,6 +74,7 @@ public final class Config {
     public String stopped        = "<yellow>Stopped <white><server></white>.</yellow>";
     public String stopKick       = "<red><white><server></white> is stopping. Please rejoin later.</red>";
     public String alreadyStopped = "<gray><white><server></white> is not running.</gray>";
+    public String craftyManaged  = "<red>Lifecycle is managed by Crafty Controller — use the Crafty panel to start/stop/restart <white><server></white>.</red>";
     public String statusHeader   = "<gray>Managed servers:</gray>";
     public String statusLine     = "<white><server></white>: <state>";
     public String stateOnline    = "<green>online</green>";
@@ -150,9 +151,20 @@ public final class Config {
 
   public static final class Compatibility {
     public ServerBridgeCompatibility serverBridge = new ServerBridgeCompatibility();
+    public CraftyCompatibility crafty = new CraftyCompatibility();
   }
 
   public static final class ServerBridgeCompatibility {
+    public boolean enabled = false;
+  }
+
+  public static final class CraftyCompatibility {
+    /**
+     * When true, an external manager (Crafty Controller) owns the backend processes.
+     * ServerManager then stops starting/stopping/restarting backends and determines whether a
+     * server is "up" by pinging it, instead of by a process handle it owns. Whitelist, the login
+     * webpage, bans/moderation, MOTD and forced-host routing are unaffected.
+     */
     public boolean enabled = false;
   }
 
@@ -274,9 +286,14 @@ public final class Config {
           thresholds:
             connections: { limit: 10, windowSeconds: 10 }
             pings:       { limit: 15, windowSeconds: 10 }
-            badUsernames:{ limit: 5,  windowSeconds: 60 }
+            badUsernames: { limit: 5,  windowSeconds: 60 }
         compatibility:
           serverBridge:
+            enabled: false
+          crafty:
+            # true => Crafty Controller owns the backend processes. ServerManager will not
+            # start/stop/restart backends and decides "online" by pinging them. Whitelist,
+            # login webpage, bans/moderation, MOTD and forced-host routing keep working.
             enabled: false
         forcedHosts: {}
         """;
@@ -320,6 +337,7 @@ public final class Config {
     if (cfg.autoIpBan.thresholds.badUsernames == null) cfg.autoIpBan.thresholds.badUsernames = new Threshold();
     if (cfg.compatibility == null) cfg.compatibility = new Compatibility();
     if (cfg.compatibility.serverBridge == null) cfg.compatibility.serverBridge = new ServerBridgeCompatibility();
+    if (cfg.compatibility.crafty == null) cfg.compatibility.crafty = new CraftyCompatibility();
     if (cfg.forcedHosts == null) cfg.forcedHosts = new LinkedHashMap<>();
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;

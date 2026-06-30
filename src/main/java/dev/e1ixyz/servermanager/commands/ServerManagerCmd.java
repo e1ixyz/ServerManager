@@ -557,7 +557,7 @@ public final class ServerManagerCmd implements SimpleCommand {
         if (!has(src, PERM_STATUS)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
         src.sendMessage(mm0(config.messages.statusHeader));
         for (var name : config.servers.keySet()) {
-          boolean running = manager.isRunning(name);
+          boolean running = plugin.isServerUp(name); // ping-based in Crafty mode, process handle otherwise
           String state = running ? config.messages.stateOnline : config.messages.stateOffline;
           long holdRemaining = manager.holdRemainingSeconds(name);
           if (holdRemaining > 0) {
@@ -572,6 +572,7 @@ public final class ServerManagerCmd implements SimpleCommand {
       }
       case "start" -> {
         if (!has(src, PERM_START)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        if (plugin.isCraftyModeEnabled()) { src.sendMessage(mm2(config.messages.craftyManaged, server == null ? "" : server, nameOf(src))); return; }
         if (server == null) { src.sendMessage(mm0(config.messages.usage)); return; }
         if (!manager.isKnown(server)) { src.sendMessage(mm2(config.messages.unknownServer, server, nameOf(src))); return; }
         if (manager.isRunning(server)) { src.sendMessage(mm2(config.messages.alreadyRunning, server, nameOf(src))); return; }
@@ -585,6 +586,7 @@ public final class ServerManagerCmd implements SimpleCommand {
       }
       case "stop" -> {
         if (!has(src, PERM_STOP)) { src.sendMessage(mm0(config.messages.noPermission)); return; }
+        if (plugin.isCraftyModeEnabled()) { src.sendMessage(mm2(config.messages.craftyManaged, server == null ? "" : server, nameOf(src))); return; }
         if (server == null) { src.sendMessage(mm0(config.messages.usage)); return; }
         if (!manager.isKnown(server)) { src.sendMessage(mm2(config.messages.unknownServer, server, nameOf(src))); return; }
         if (!manager.isRunning(server)) { src.sendMessage(mm2(config.messages.alreadyStopped, server, nameOf(src))); return; }
@@ -619,6 +621,7 @@ public final class ServerManagerCmd implements SimpleCommand {
           src.sendMessage(mm0(config.messages.noPermission));
           return;
         }
+        if (plugin.isCraftyModeEnabled()) { src.sendMessage(mm2(config.messages.craftyManaged, server == null ? "" : server, nameOf(src))); return; }
         if (server == null) {
           src.sendMessage(mm0(firstNonBlank(config.messages.holdUsage, config.messages.usage)));
           return;
@@ -685,6 +688,7 @@ public final class ServerManagerCmd implements SimpleCommand {
           src.sendMessage(mm0(config.messages.noPermission));
           return;
         }
+        if (plugin.isCraftyModeEnabled()) { src.sendMessage(mm2(config.messages.craftyManaged, args.length >= 2 ? args[1] : "", nameOf(src))); return; }
         String updateServer = args.length >= 2 ? args[1] : null;
         String waitingServer = args.length >= 3 ? args[2] : null;
         if (updateServer == null || waitingServer == null) {

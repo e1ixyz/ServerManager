@@ -95,7 +95,8 @@ public final class ServerManagerPlugin {
         proxy.getEventManager().unregisterListeners(this);
         playerEvents = null;
       }
-      if (processManager != null) {
+      if (processManager != null && !isCraftyModeEnabled()) {
+        // In Crafty mode the backends are owned by Crafty and must survive a proxy restart.
         processManager.stopAllGracefully();
       }
       shutdownModeration();
@@ -203,6 +204,26 @@ public final class ServerManagerPlugin {
         && config.compatibility.serverBridge.enabled;
   }
 
+  /** True when Crafty Controller owns the backend processes (ServerManager defers lifecycle). */
+  public boolean isCraftyModeEnabled() {
+    return config != null
+        && config.compatibility != null
+        && config.compatibility.crafty != null
+        && config.compatibility.crafty.enabled;
+  }
+
+  /**
+   * Whether a server should be considered "up". In Crafty mode this is ping readiness (Crafty owns
+   * the process, so the process handle is absent); otherwise it is the owned process handle.
+   */
+  public boolean isServerUp(String server) {
+    if (processManager == null) return false;
+    if (isCraftyModeEnabled()) {
+      return playerEvents != null && playerEvents.isServerReady(server);
+    }
+    return processManager.isRunning(server);
+  }
+
   public CompletableFuture<Boolean> ensureServerReady(String server) {
     if (!isServerBridgeCompatibilityEnabled() || playerEvents == null) {
       return CompletableFuture.completedFuture(Boolean.FALSE);
@@ -238,8 +259,9 @@ public final class ServerManagerPlugin {
     }
 
     Path workingDir = resolveManagedServerWorkingDirectories().get(server);
-    boolean running = processManager.isRunning(server);
     boolean ready = playerEvents != null && playerEvents.isServerReady(server);
+    // In Crafty mode the process handle is absent; report ping readiness as "running".
+    boolean running = isCraftyModeEnabled() ? ready : processManager.isRunning(server);
     boolean holdActive = processManager.isHoldActive(server);
     long holdRemainingSeconds = processManager.holdRemainingSeconds(server);
     boolean primary = server.equals(config.primaryServerName());

@@ -31,6 +31,7 @@ dev/e1ixyz/servermanager/listeners/PlayerEvents$QueuedArrivalTask.class
 dev/e1ixyz/servermanager/commands/StartCmd.class
 dev/e1ixyz/servermanager/whitelist/WhitelistHttpServer.class
 dev/e1ixyz/servermanager/Config$ServerBridgeCompatibility.class
+dev/e1ixyz/servermanager/Config$CraftyCompatibility.class
 dev/e1ixyz/servermanager/moderation/AutoIpBanService$EventType.class
 dev/e1ixyz/servermanager/commands/ServerManagerCmd$Target.class
 dev/e1ixyz/servermanager/moderation/AutoIpBanService$IpCounters.class

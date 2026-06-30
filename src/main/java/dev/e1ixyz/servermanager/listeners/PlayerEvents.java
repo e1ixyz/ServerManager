@@ -218,6 +218,12 @@ public final class PlayerEvents {
     this.heartbeatTask = proxy.getScheduler().buildTask(pluginOwner, () -> {
       if (shuttingDown) return;
       for (String name : cfg.servers.keySet()) {
+        if (craftyMode()) {
+          // Crafty owns the process: never start/stop here. Liveness comes from ping only.
+          proxy.getServer(name).ifPresent(rs -> rs.ping().whenComplete((ok, err) ->
+              updateReadiness(name, err == null)));
+          continue;
+        }
         refreshHoldRestart(name);
         if (!mgr.isRunning(name)) {
           updateReadiness(name, false);
@@ -276,7 +282,8 @@ public final class PlayerEvents {
     String l2 = offline2;
 
     if (trackedServer != null) {
-      boolean running = mgr.isRunning(trackedServer);
+      boolean running = mgr.isRunning(trackedServer)
+          || (craftyMode() && Boolean.TRUE.equals(isReadyCache.get(trackedServer)));
       Boolean ready = isReadyCache.get(trackedServer);
       boolean onlineState = Boolean.TRUE.equals(ready);
       boolean startingState = running && !onlineState;
@@ -404,7 +411,8 @@ public final class PlayerEvents {
       return;
     }
     String primary = cfg.primaryServerName();
-    boolean running = mgr.isRunning(target);
+    // In Crafty mode the process handle is always absent (Crafty owns it), so trust ping readiness.
+    boolean running = mgr.isRunning(target) || (craftyMode() && isReady(target));
     boolean ready = isReady(target);
     boolean startingState = running && !ready;
     boolean isPrimary = target.equals(primary);
@@ -447,8 +455,12 @@ public final class PlayerEvents {
       if (!hasFallback) {
         try {
           if (!running) {
-            log.info("Intercepting initial connect to offline [{}]; starting process for {}", target, player.getUsername());
-            mgr.start(target);
+            if (craftyMode()) {
+              log.info("[{}] not ping-ready (Crafty-managed); denying connect without starting.", target);
+            } else {
+              log.info("Intercepting initial connect to offline [{}]; starting process for {}", target, player.getUsername());
+              mgr.start(target);
+            }
           } else {
             log.info("Intercepting connect to starting [{}]; deferring player {}", target, player.getUsername());
           }
@@ -480,8 +492,12 @@ public final class PlayerEvents {
 
       try {
         if (!running) {
-          log.info("Intercepting connect to offline [{}]; starting and queueing auto-connect", target);
-          mgr.start(target);
+          if (craftyMode()) {
+            log.info("[{}] not ping-ready (Crafty-managed); queueing auto-connect without starting.", target);
+          } else {
+            log.info("Intercepting connect to offline [{}]; starting and queueing auto-connect", target);
+            mgr.start(target);
+          }
         } else {
           log.info("Intercepting connect to starting [{}]; queueing auto-connect", target);
         }
@@ -586,6 +602,7 @@ public final class PlayerEvents {
   // -------------------- Stop helpers --------------------
   /** Schedule a stop for this backend if it currently has zero players. */
   private void scheduleStopIfServerEmpty(String serverName) {
+    if (craftyMode()) return; // Crafty owns lifecycle; never auto-stop.
     if (!mgr.isKnown(serverName)) return;
     if (countPlayersOn(serverName) > 0) return;
     if (pendingServerStop.containsKey(serverName)) return;
@@ -630,6 +647,7 @@ public final class PlayerEvents {
 
   /** Arm a stop-all when the entire proxy is empty (covers kick-to-start case). */
   private void scheduleStopAllIfProxyEmpty() {
+    if (craftyMode()) return; // Crafty owns lifecycle; never auto-stop.
     // Debounce slightly to let Velocity update player list
     proxy.getScheduler().buildTask(pluginOwner, () -> {
       if (!proxy.getAllPlayers().isEmpty()) return;
@@ -685,6 +703,10 @@ public final class PlayerEvents {
 
   // -------------------- Indefinite hold auto-restart --------------------
   private void refreshHoldRestart(String serverName) {
+    if (craftyMode()) { // Crafty owns lifecycle; never auto-restart.
+      cancelHoldRestart(serverName);
+      return;
+    }
     if (shuttingDown) {
       cancelHoldRestart(serverName);
       return;
@@ -926,6 +948,16 @@ public final class PlayerEvents {
     return isReady(serverName);
   }
 
+  /**
+   * When true, an external manager (Crafty Controller) owns the backend processes. ServerManager
+   * must not start/stop/restart backends and must decide liveness by ping instead of a process handle.
+   */
+  private boolean craftyMode() {
+    return cfg.compatibility != null
+        && cfg.compatibility.crafty != null
+        && cfg.compatibility.crafty.enabled;
+  }
+
   public CompletableFuture<Boolean> ensureServerReady(String serverName) {
     String normalized = sanitizeServerName(serverName);
     if (normalized == null || !mgr.isKnown(normalized) || proxy.getServer(normalized).isEmpty()) {
@@ -936,7 +968,7 @@ public final class PlayerEvents {
     }
 
     CompletableFuture<Boolean> future = enqueueReadyWaiter(normalized);
-    if (!mgr.isRunning(normalized)) {
+    if (!craftyMode() && !mgr.isRunning(normalized)) {
       try {
         mgr.start(normalized);
       } catch (IOException ex) {
@@ -989,7 +1021,7 @@ public final class PlayerEvents {
     }
 
     boolean alreadyWaiting = normalized.equalsIgnoreCase(waitingTarget.get(playerId));
-    if (!mgr.isRunning(normalized)) {
+    if (!craftyMode() && !mgr.isRunning(normalized)) {
       try {
         mgr.start(normalized);
       } catch (IOException ex) {

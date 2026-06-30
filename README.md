@@ -178,12 +178,14 @@ autoIpBan:
   thresholds:
     connections: { limit: 10, windowSeconds: 10 }
     pings:       { limit: 15, windowSeconds: 10 }
-    badUsernames:{ limit: 5,  windowSeconds: 60 }
+    badUsernames: { limit: 5,  windowSeconds: 60 }
 
 forcedHosts: {}
 
 compatibility:
   serverBridge:
+    enabled: false
+  crafty:
     enabled: false
 ```
 
@@ -203,6 +205,7 @@ Key points:
 - `moderation:` controls the proxy-level moderation registry used by the standalone `/ban`, `/stealthban`, `/ipban`, `/mute`, `/warn`, and list commands. When enabled (default) bans are enforced at login, before any backend starts.
 - `autoIpBan:` enables lightweight rate-based IP bans for ping/login spam; set `dryRun: true` to log-only first and add trusted IPs for your proxy/CDN.
 - `compatibility.serverBridge.enabled: true` turns on the explicit companion-plugin API used by `ServerBridge`. Leave it `false` if you want `ServerManager` to behave as a standalone start-on-demand plugin only.
+- `compatibility.crafty.enabled: true` hands **backend process lifecycle** to an external manager (Crafty Controller). `ServerManager` then never starts/stops/restarts backends and decides whether a server is "online" by **pinging** it instead of by a process handle it owns. Whitelist, the login webpage, bans/moderation, MOTD, and forced-host routing keep working. See **Crafty Compatibility** below for the full keep/lose list. Default `false`, which preserves all existing behavior.
 
 ## ServerBridge Compatibility
 
@@ -228,6 +231,48 @@ This is what lets `ServerBridge` handle a remote EssentialsX `/home` on an offli
 4. After delivery, `ServerManager` runs the queued post-connect action so `ServerBridge` can execute the normal backend EssentialsX command.
 
 If compatibility mode is disabled, the core `/server <name>` startup and auto-send behavior still works exactly as before. Companion plugins just do not get the stronger explicit lifecycle hooks.
+
+## Crafty Compatibility
+
+`compatibility.crafty.enabled: true` lets an external panel — **Crafty Controller** — own the backend
+JVM processes while `ServerManager` keeps doing access control and routing. Without this, the two
+conflict: `ServerManager` decides "running" from a process handle it owns, so a Crafty-started
+backend looks offline on every join, and `ServerManager` would kick the player and spawn a second
+JVM on the same world. In Crafty mode `ServerManager` stops touching process lifecycle entirely and
+trusts its existing ping heartbeat to know what is up.
+
+**Enable it:**
+
+```yaml
+compatibility:
+  crafty:
+    enabled: true
+```
+
+**Kept, unchanged** (none of these depend on owning the process):
+
+- Network code-whitelist and the `login.merp.quest` webpage.
+- Per-connect whitelist gating (vanilla bypass, mirror-network-whitelist).
+- Bans / mutes / warns and stealth-ban kicks.
+- Auto-IP-ban flood protection.
+- Dynamic MOTD (online/offline) — now driven purely by ping.
+- Forced-host routing, join preferences, recent-reconnect routing, primary/landing routing.
+- The `ServerBridge` compatibility API (cross-server `/home`, teleport) — it connects without starting.
+- `/sm status` (reports online/offline by ping), `/sm preference`, `/sm reload`, whitelist + moderation commands.
+
+**Lost / moves to Crafty** (these require `ServerManager` to own the process):
+
+1. On-demand auto-start when a player joins an offline backend — keep backends running under Crafty.
+2. On-demand idle auto-stop of empty backends.
+3. Daily auto-restart via `autoRestartHoldTime` and the whole hold system — use Crafty's scheduler.
+4. `ServerManager`'s backend console — `logToFile` capture, log files, the macOS Terminal window, and
+   the stdin command-spool. Console and command-send move to Crafty's console.
+5. `/sm start`, `/sm stop`, `/sm hold`, `/sm updateplugins` for backends — refused in Crafty mode
+   (start/stop/restart happen in the Crafty panel).
+6. Graceful stop-all on proxy shutdown — Crafty keeps backends up independently of the proxy.
+
+`startOnJoin` still designates the primary/landing server for routing in Crafty mode; it just no
+longer triggers a process start.
 
 ## Network Whitelist Flow
 1. Player joins Velocity.
