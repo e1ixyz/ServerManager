@@ -9,6 +9,7 @@
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/whitelist/WhitelistService.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/listeners/PlayerEvents.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/ManagedLifecycleListener.java
+/Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/maps/MapsHttpServer.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/preferences/JoinPreferenceService.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/Config.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/whitelist/WhitelistHttpServer.java

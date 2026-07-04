@@ -33,6 +33,7 @@ dev/e1ixyz/servermanager/whitelist/WhitelistHttpServer.class
 dev/e1ixyz/servermanager/Config$ServerBridgeCompatibility.class
 dev/e1ixyz/servermanager/Config$CraftyCompatibility.class
 dev/e1ixyz/servermanager/moderation/AutoIpBanService$EventType.class
+dev/e1ixyz/servermanager/Config$MapTab.class
 dev/e1ixyz/servermanager/commands/ServerManagerCmd$Target.class
 dev/e1ixyz/servermanager/moderation/AutoIpBanService$IpCounters.class
 dev/e1ixyz/servermanager/commands/ServerManagerCmd.class
@@ -41,6 +42,7 @@ dev/e1ixyz/servermanager/whitelist/WhitelistService$PendingCode.class
 dev/e1ixyz/servermanager/Config.class
 dev/e1ixyz/servermanager/moderation/ModerationService.class
 dev/e1ixyz/servermanager/moderation/AutoIpBanService$Decision.class
+dev/e1ixyz/servermanager/Config$Maps.class
 dev/e1ixyz/servermanager/Config$Motd.class
 dev/e1ixyz/servermanager/whitelist/VanillaWhitelistChecker$VanillaEntry.class
 dev/e1ixyz/servermanager/listeners/PlayerEvents$RecentDisconnect.class
@@ -48,6 +50,7 @@ dev/e1ixyz/servermanager/Config$Compatibility.class
 dev/e1ixyz/servermanager/preferences/JoinPreferenceService.class
 dev/e1ixyz/servermanager/moderation/AutoIpBanService$SlidingWindow.class
 dev/e1ixyz/servermanager/ServerManagerPlugin.class
+dev/e1ixyz/servermanager/maps/MapsHttpServer.class
 dev/e1ixyz/servermanager/whitelist/VanillaWhitelistChecker$Cache.class
 dev/e1ixyz/servermanager/commands/ModerationCommands$ParsedAction.class
 dev/e1ixyz/servermanager/ServerProcessManager.class

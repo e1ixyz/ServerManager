@@ -2,6 +2,7 @@ package dev.e1ixyz.servermanager;
 
 import dev.e1ixyz.servermanager.commands.ServerManagerCmd;
 import dev.e1ixyz.servermanager.listeners.PlayerEvents;
+import dev.e1ixyz.servermanager.maps.MapsHttpServer;
 import dev.e1ixyz.servermanager.moderation.ModerationService;
 import dev.e1ixyz.servermanager.preferences.JoinPreferenceService;
 import dev.e1ixyz.servermanager.whitelist.WhitelistHttpServer;
@@ -44,6 +45,7 @@ public final class ServerManagerPlugin {
   private ServerProcessManager processManager;
   private WhitelistService whitelistService;
   private WhitelistHttpServer whitelistHttpServer;
+  private MapsHttpServer mapsHttpServer;
   private VanillaWhitelistChecker vanillaWhitelist;
   private JoinPreferenceService joinPreferences;
   private PlayerEvents playerEvents;
@@ -90,6 +92,9 @@ public final class ServerManagerPlugin {
       if (whitelistHttpServer != null) {
         whitelistHttpServer.stop();
       }
+      if (mapsHttpServer != null) {
+        mapsHttpServer.stop();
+      }
       if (playerEvents != null) {
         playerEvents.shutdown();
         proxy.getEventManager().unregisterListeners(this);
@@ -127,6 +132,10 @@ public final class ServerManagerPlugin {
         whitelistHttpServer.stop();
         whitelistHttpServer = null;
       }
+      if (mapsHttpServer != null) {
+        mapsHttpServer.stop();
+        mapsHttpServer = null;
+      }
       if (playerEvents != null) {
         playerEvents.shutdown();
         playerEvents = null;
@@ -163,6 +172,8 @@ public final class ServerManagerPlugin {
     this.moderation = new ModerationService(newConfig.moderation, logger, dataDir);
     this.whitelistHttpServer = new WhitelistHttpServer(newConfig.whitelist, logger, whitelistService);
     this.whitelistHttpServer.start();
+    this.mapsHttpServer = new MapsHttpServer(newConfig.maps, logger);
+    this.mapsHttpServer.start();
     this.playerEvents = new PlayerEvents(this, proxy, newConfig, processManager, logger,
         whitelistService, vanillaWhitelist, moderation, joinPreferences);
     proxy.getEventManager().register(this, playerEvents);

@@ -23,6 +23,7 @@ public final class Config {
   public Map<String, ForcedHost> forcedHosts = new LinkedHashMap<>();
   public Messages messages = new Messages();
   public Whitelist whitelist = new Whitelist();
+  public Maps maps = new Maps();
   public Moderation moderation = new Moderation();
   public AutoIpBan autoIpBan = new AutoIpBan();
   public Compatibility compatibility = new Compatibility();
@@ -112,6 +113,19 @@ public final class Config {
     public String successMessage = "Success! You are now whitelisted. You may rejoin the server.";
     public String failureMessage = "Invalid or expired code. Please try again from in-game.";
     public String buttonText = "Verify & Whitelist";
+  }
+
+  public static final class Maps {
+    public boolean enabled = false;
+    public String bind = "127.0.0.1"; // localhost-only; cloudflared reaches it locally
+    public int port = 8090;
+    public String pageTitle = "Merp Network Maps";
+    public List<MapTab> tabs = new ArrayList<>();
+  }
+
+  public static final class MapTab {
+    public String label;
+    public String url;
   }
 
   public static final class ForcedHost {
@@ -273,6 +287,14 @@ public final class Config {
           successMessage: "Success! You are now whitelisted. You may rejoin the server."
           failureMessage: "Invalid or expired code. Please try again from in-game."
           buttonText: "Verify & Whitelist"
+        maps:
+          enabled: false
+          bind: "127.0.0.1"
+          port: 8090
+          pageTitle: "Merp Network Maps"
+          tabs:
+            - { label: "SMP",  url: "https://legacymap.merp.quest" }
+            - { label: "SMP2", url: "https://map.merp.quest" }
         moderation:
           enabled: true
           dataFile: "moderation.yml"
@@ -329,6 +351,8 @@ public final class Config {
       cfg.messages.stealthBanKickMessages = new ArrayList<>(Messages.defaultStealthBanKickMessages());
     }
     if (cfg.whitelist == null) cfg.whitelist = new Whitelist();
+    if (cfg.maps == null) cfg.maps = new Maps();
+    if (cfg.maps.tabs == null) cfg.maps.tabs = new ArrayList<>();
     if (cfg.moderation == null) cfg.moderation = new Moderation();
     if (cfg.autoIpBan == null) cfg.autoIpBan = new AutoIpBan();
     if (cfg.autoIpBan.thresholds == null) cfg.autoIpBan.thresholds = new AutoThresholds();
