@@ -125,7 +125,8 @@ public final class Config {
 
   public static final class MapTab {
     public String label;
-    public String url;
+    public String path;    // same-origin path segment, e.g. "smp" -> served at /smp/
+    public String backend; // local Dynmap base to proxy to, e.g. "http://127.0.0.1:8124"
   }
 
   public static final class ForcedHost {
@@ -293,8 +294,8 @@ public final class Config {
           port: 8090
           pageTitle: "Merp Network Maps"
           tabs:
-            - { label: "SMP",  url: "https://legacymap.merp.quest" }
-            - { label: "SMP2", url: "https://map.merp.quest" }
+            - { label: "SMP",  path: "smp",  backend: "http://127.0.0.1:8124" }
+            - { label: "SMP2", path: "smp2", backend: "http://127.0.0.1:8123" }
         moderation:
           enabled: true
           dataFile: "moderation.yml"
