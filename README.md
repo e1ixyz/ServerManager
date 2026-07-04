@@ -151,10 +151,10 @@ servers:
 
 whitelist:
   enabled: false
-  bind: "0.0.0.0"
+  bind: "127.0.0.1"                 # localhost-only; put a reverse proxy (e.g. cloudflared) in front
   port: 8081
   baseUrl: "http://127.0.0.1:8081"
-  kickMessage: "You are not whitelisted. Visit <url> and enter your username and code <code>."
+  kickMessage: "You are not whitelisted. Visit <url> and enter code <code>."
   codeLength: 6
   codeTtlSeconds: 900
   dataFile: "network-whitelist.yml"
@@ -162,8 +162,11 @@ whitelist:
   pageTitle: "Network Access"
   pageSubtitle: "Enter the code shown in-game to whitelist your account."
   successMessage: "Success! You are now whitelisted. You may rejoin the server."
-  failureMessage: "Invalid or expired code. Please try again from in-game."
+  failureMessage: "Invalid or expired code. Rejoin in-game to get a new one."
   buttonText: "Verify & Whitelist"
+  maxAttempts: 10                   # redemption attempts allowed per client IP per window
+  windowSeconds: 300                # sliding rate-limit window
+  rateLimitedMessage: "Too many attempts. Please wait a few minutes and try again."
 
 moderation:
   enabled: true
@@ -263,12 +266,15 @@ compatibility:
 **Lost / moves to Crafty** (these require `ServerManager` to own the process):
 
 1. On-demand auto-start when a player joins an offline backend — keep backends running under Crafty.
+   A player connecting to an offline backend is told it is **offline** (not "starting"), since
+   `ServerManager` no longer starts it; they're still auto-connected if it comes online.
 2. On-demand idle auto-stop of empty backends.
 3. Daily auto-restart via `autoRestartHoldTime` and the whole hold system — use Crafty's scheduler.
 4. `ServerManager`'s backend console — `logToFile` capture, log files, the macOS Terminal window, and
    the stdin command-spool. Console and command-send move to Crafty's console.
 5. `/sm start`, `/sm stop`, `/sm hold`, `/sm updateplugins` for backends — refused in Crafty mode
-   (start/stop/restart happen in the Crafty panel).
+   (start/stop/restart happen in the Crafty panel), and **hidden from `/sm help` and tab-complete**
+   while Crafty mode is on.
 6. Graceful stop-all on proxy shutdown — Crafty keeps backends up independently of the proxy.
 
 `startOnJoin` still designates the primary/landing server for routing in Crafty mode; it just no
@@ -278,15 +284,22 @@ longer triggers a process start.
 1. Player joins Velocity.
 2. If their UUID or username exists in `network-whitelist.yml`, or (optionally) in the primary backend's `whitelist.json`, they proceed normally.
 3. Otherwise the plugin:
-   - Issues a short numeric code and stores it in-memory for that UUID.
+   - Issues a short numeric code **bound to that player's authenticated UUID** and stores it in-memory.
    - Disconnects the player with the configured `kickMessage`, replacing `<url>` and `<code>`.
    - Keeps backend servers off until the player is verified (avoiding accidental auto-starts).
 4. The player visits the web form served by the embedded HTTP server (reachable at `baseUrl`).
-5. After entering their in-game name and code, the plugin validates the submission, writes the entry to `network-whitelist.yml`, and shows a success message instructing them to reconnect.
+5. They enter **only the code** — because it's tied to their UUID, redeeming it whitelists the exact
+   account it was issued to (no username field, so no way to typo the wrong name). The plugin writes
+   the entry to `network-whitelist.yml` and shows a success message instructing them to reconnect.
 
 Notes:
-- `bind` / `port` define the listen address. Use a reverse proxy (or change `baseUrl`) to expose the form over HTTPS.
-- Codes expire after `codeTtlSeconds` and are one-time. Requesting a new code replaces the old one.
+- `bind` / `port` define the listen address. `bind` defaults to `127.0.0.1`; put a reverse proxy
+  (e.g. cloudflared) in front for HTTPS and set `baseUrl` to the public URL.
+- Codes expire after `codeTtlSeconds` and are one-time. A wrong code isn't consumed, so retries work.
+- **Security:** the page is rate-limited per client IP (`maxAttempts` / `windowSeconds`, read from
+  `CF-Connecting-IP` behind Cloudflare), caps request bodies, sends a strict CSP + `X-Frame-Options`/
+  `X-Content-Type-Options`/`Referrer-Policy`, and escapes all reflected input. Keep `bind` on localhost
+  behind the proxy so the port isn't exposed on the public interface.
 - `network-whitelist.yml` is written atomically and can be edited manually while Velocity is offline if needed.
 
 ## Forced-Host Overrides
