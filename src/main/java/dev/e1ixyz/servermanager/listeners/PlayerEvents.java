@@ -473,7 +473,12 @@ public final class PlayerEvents {
         }
 
         event.setResult(ServerPreConnectEvent.ServerResult.denied());
-        player.disconnect(Component.text(kickMessage));
+        // In Crafty mode we didn't start anything, so don't imply we did — the server is simply offline.
+        if (craftyMode()) {
+          player.disconnect(mm(cfg.messages.craftyOfflineKick, target, player.getUsername()));
+        } else {
+          player.disconnect(Component.text(kickMessage));
+        }
         scheduleStopAllIfProxyEmpty();
         return;
       }
@@ -512,7 +517,7 @@ public final class PlayerEvents {
       event.setResult(ServerPreConnectEvent.ServerResult.denied());
 
       Player p = event.getPlayer();
-      p.sendMessage(mm(cfg.messages.startingQueued, target, p.getUsername()));
+      p.sendMessage(mm(craftyMode() ? cfg.messages.craftyOfflineQueued : cfg.messages.startingQueued, target, p.getUsername()));
       queueAutoSend(p, target);
     }
   }
@@ -866,8 +871,8 @@ public final class PlayerEvents {
         cancelPendingConnect(id);
         player.sendMessage(mm(cfg.messages.timeout, serverName, player.getUsername()));
         failQueuedArrivals(id, serverName);
-        // Enforce "no backend without players" if nobody reached it
-        if (countPlayersOn(serverName) == 0 && mgr.isRunning(serverName)) {
+        // Enforce "no backend without players" if nobody reached it (never touch processes in Crafty mode).
+        if (!craftyMode() && countPlayersOn(serverName) == 0 && mgr.isRunning(serverName)) {
           if (mgr.isHoldActive(serverName)) {
             log.info("[{}] auto-send timeout hit but hold is active; leaving running.", serverName);
             return;
@@ -1033,7 +1038,7 @@ public final class PlayerEvents {
     }
 
     if (!alreadyWaiting) {
-      livePlayer.sendMessage(mm(cfg.messages.startingQueued, normalized, livePlayer.getUsername()));
+      livePlayer.sendMessage(mm(craftyMode() ? cfg.messages.craftyOfflineQueued : cfg.messages.startingQueued, normalized, livePlayer.getUsername()));
       queueAutoSend(livePlayer, normalized);
     }
     return future;

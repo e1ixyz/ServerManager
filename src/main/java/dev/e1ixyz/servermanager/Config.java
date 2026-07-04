@@ -76,6 +76,8 @@ public final class Config {
     public String stopKick       = "<red><white><server></white> is stopping. Please rejoin later.</red>";
     public String alreadyStopped = "<gray><white><server></white> is not running.</gray>";
     public String craftyManaged  = "<red>Lifecycle is managed by Crafty Controller — use the Crafty panel to start/stop/restart <white><server></white>.</red>";
+    public String craftyOfflineKick   = "<red><white><server></white> is offline right now.</red><newline><gray>Ask an admin to bring it online, then rejoin.</gray>";
+    public String craftyOfflineQueued = "<yellow><white><server></white> is offline.</yellow><gray> You'll be sent automatically if it comes online.</gray>";
     public String statusHeader   = "<gray>Managed servers:</gray>";
     public String statusLine     = "<white><server></white>: <state>";
     public String stateOnline    = "<green>online</green>";
@@ -100,10 +102,10 @@ public final class Config {
 
   public static final class Whitelist {
     public boolean enabled = false;
-    public String bind = "0.0.0.0";
+    public String bind = "127.0.0.1"; // localhost-only; cloudflared reaches it locally
     public int port = 8081;
     public String baseUrl = "http://127.0.0.1:8081";
-    public String kickMessage = "You are not whitelisted. Visit <url> and enter your username and code <code>.";
+    public String kickMessage = "You are not whitelisted. Visit <url> and enter code <code>.";
     public int codeLength = 6;
     public int codeTtlSeconds = 900;
     public String dataFile = "network-whitelist.yml";
@@ -111,8 +113,12 @@ public final class Config {
     public String pageTitle = "Network Access";
     public String pageSubtitle = "Enter the code shown in-game to whitelist your account.";
     public String successMessage = "Success! You are now whitelisted. You may rejoin the server.";
-    public String failureMessage = "Invalid or expired code. Please try again from in-game.";
+    public String failureMessage = "Invalid or expired code. Rejoin in-game to get a new one.";
     public String buttonText = "Verify & Whitelist";
+    // Redemption brute-force throttle (per client IP, sliding window).
+    public int maxAttempts = 10;
+    public int windowSeconds = 300;
+    public String rateLimitedMessage = "Too many attempts. Please wait a few minutes and try again.";
   }
 
   public static final class Maps {
@@ -275,10 +281,10 @@ public final class Config {
             openConsoleWindow: false
         whitelist:
           enabled: false
-          bind: "0.0.0.0"
+          bind: "127.0.0.1"
           port: 8081
           baseUrl: "http://127.0.0.1:8081"
-          kickMessage: "You are not whitelisted. Visit <url> and enter your username and code <code>."
+          kickMessage: "You are not whitelisted. Visit <url> and enter code <code>."
           codeLength: 6
           codeTtlSeconds: 900
           dataFile: "network-whitelist.yml"
@@ -286,8 +292,11 @@ public final class Config {
           pageTitle: "Network Access"
           pageSubtitle: "Enter the code shown in-game to whitelist your account."
           successMessage: "Success! You are now whitelisted. You may rejoin the server."
-          failureMessage: "Invalid or expired code. Please try again from in-game."
+          failureMessage: "Invalid or expired code. Rejoin in-game to get a new one."
           buttonText: "Verify & Whitelist"
+          maxAttempts: 10
+          windowSeconds: 300
+          rateLimitedMessage: "Too many attempts. Please wait a few minutes and try again."
         maps:
           enabled: false
           bind: "127.0.0.1"
@@ -370,6 +379,8 @@ public final class Config {
     if (cfg.reconnectWindowSeconds < 0) cfg.reconnectWindowSeconds = 0;
     if (cfg.whitelist.codeLength < 4) cfg.whitelist.codeLength = 4;
     if (cfg.whitelist.codeTtlSeconds < 60) cfg.whitelist.codeTtlSeconds = 60;
+    if (cfg.whitelist.maxAttempts < 1) cfg.whitelist.maxAttempts = 1;
+    if (cfg.whitelist.windowSeconds < 1) cfg.whitelist.windowSeconds = 1;
 
     return cfg;
   }

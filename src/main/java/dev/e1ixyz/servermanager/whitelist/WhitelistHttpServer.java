@@ -11,6 +11,8 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -18,13 +20,22 @@ import java.util.Objects;
 
 /**
  * Minimal web UI to redeem join codes and add players to the network whitelist.
+ * The code is bound to the player's authenticated UUID when it is issued, so the
+ * page only asks for the code — entering it whitelists the account it was issued to.
  */
 public final class WhitelistHttpServer {
+
+  private static final int MAX_BODY_BYTES = 8192;
+  private static final String CSP =
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
   private final Config.Whitelist cfg;
   private final Logger log;
   private final WhitelistService whitelist;
   private HttpServer http;
+
+  /** Per-IP sliding-window attempt timestamps (brute-force throttle on redemption). */
+  private final Map<String, Deque<Long>> attempts = new HashMap<>();
 
   public WhitelistHttpServer(Config.Whitelist cfg, Logger log, WhitelistService whitelist) {
     this.cfg = cfg;
@@ -56,25 +67,34 @@ public final class WhitelistHttpServer {
     try {
       String method = ex.getRequestMethod();
       if ("GET".equalsIgnoreCase(method)) {
-        String rawQuery = ex.getRequestURI().getRawQuery();
-        Map<String, String> params = parseKv(rawQuery);
-        renderForm(ex, null, params.get("code"), params.get("name"));
+        Map<String, String> params = parseKv(ex.getRequestURI().getRawQuery());
+        renderForm(ex, 200, null, params.get("code"));
         return;
       }
       if ("POST".equalsIgnoreCase(method)) {
-        String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-        Map<String, String> form = parseKv(body);
-        String name = sanitize(form.getOrDefault("name", ""));
-        String code = sanitize(form.getOrDefault("code", ""));
-        if (code.isBlank()) {
-          renderForm(ex, cfg.failureMessage, code, name);
+        if (rateLimited(clientIp(ex))) {
+          log.warn("Whitelist redeem rate-limited for {}", clientIp(ex));
+          renderForm(ex, 429, rateLimitMessage(), "");
           return;
         }
-        boolean ok = whitelist.redeem(code, name);
+        // Bounded read: reject oversized bodies rather than buffering unbounded input.
+        byte[] raw = ex.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+        if (raw.length > MAX_BODY_BYTES) {
+          sendPlain(ex, 413, "Payload Too Large");
+          return;
+        }
+        Map<String, String> form = parseKv(new String(raw, StandardCharsets.UTF_8));
+        String code = sanitize(form.getOrDefault("code", ""));
+        if (code.isBlank()) {
+          renderForm(ex, 200, cfg.failureMessage, code);
+          return;
+        }
+        // Blank username -> WhitelistService whitelists the code's bound UUID under its original name.
+        boolean ok = whitelist.redeem(code, "");
         if (ok) {
-          renderSuccess(ex, name.isBlank() ? null : name);
+          renderSuccess(ex);
         } else {
-          renderForm(ex, cfg.failureMessage, "", name);
+          renderForm(ex, 200, cfg.failureMessage, "");
         }
         return;
       }
@@ -85,9 +105,9 @@ public final class WhitelistHttpServer {
     }
   }
 
-  private void renderForm(HttpExchange ex, String error, String code, String name) throws IOException {
+  private void renderForm(HttpExchange ex, int status, String error, String code) throws IOException {
     String title = Objects.toString(cfg.pageTitle, "Network Access");
-    String subtitle = Objects.toString(cfg.pageSubtitle, "Enter your code to whitelist your account.");
+    String subtitle = Objects.toString(cfg.pageSubtitle, "Enter the code shown in-game to whitelist your account.");
     String button = Objects.toString(cfg.buttonText, "Verify");
     String errBlock = (error == null || error.isBlank())
         ? ""
@@ -117,10 +137,8 @@ public final class WhitelistHttpServer {
             <p>%s</p>
             %s
             <form method="post">
-              <label for="name">Minecraft Username</label>
-              <input id="name" name="name" placeholder="Steve" value="%s" autocomplete="username">
               <label for="code">Whitelist Code</label>
-              <input id="code" name="code" placeholder="000000" value="%s" autocomplete="one-time-code" autofocus>
+              <input id="code" name="code" placeholder="000000" value="%s" inputmode="numeric" autocomplete="one-time-code" autofocus>
               <button type="submit">%s</button>
             </form>
           </div>
@@ -131,18 +149,16 @@ public final class WhitelistHttpServer {
         escape(title),
         escape(subtitle),
         errBlock,
-        escape(nullToEmpty(name)),
-        escape(nullToEmpty(code)),
+        escapeAttr(nullToEmpty(code)),
         escape(button)
     );
 
-    sendHtml(ex, 200, html);
+    sendHtml(ex, status, html);
   }
 
-  private void renderSuccess(HttpExchange ex, String name) throws IOException {
+  private void renderSuccess(HttpExchange ex) throws IOException {
     String title = Objects.toString(cfg.pageTitle, "Network Access");
     String msg = Objects.toString(cfg.successMessage, "You are now whitelisted. You may rejoin the server.");
-    String display = (name == null || name.isBlank()) ? "" : "<p><strong>" + escape(name) + "</strong></p>";
     String html = String.format(Locale.ROOT, """
         <!doctype html>
         <html lang="en">
@@ -160,7 +176,6 @@ public final class WhitelistHttpServer {
         <body>
           <div class="card">
             <h1>%s</h1>
-            %s
             <p>%s</p>
             <p>You can close this page and rejoin the server now.</p>
           </div>
@@ -169,11 +184,41 @@ public final class WhitelistHttpServer {
         """,
         escape(title),
         escape(title),
-        display,
         escape(msg)
     );
     sendHtml(ex, 200, html);
   }
+
+  // ---- rate limiting -------------------------------------------------------
+
+  /** True if this IP has exhausted its attempt budget in the sliding window. */
+  private synchronized boolean rateLimited(String ip) {
+    long now = System.currentTimeMillis();
+    long windowMs = Math.max(1, cfg.windowSeconds) * 1000L;
+    int max = Math.max(1, cfg.maxAttempts);
+    Deque<Long> dq = attempts.computeIfAbsent(ip, k -> new ArrayDeque<>());
+    while (!dq.isEmpty() && now - dq.peekFirst() > windowMs) dq.pollFirst();
+    if (dq.size() >= max) return true;
+    dq.addLast(now);
+    if (attempts.size() > 10_000) attempts.values().removeIf(Deque::isEmpty); // ponytail: crude cap, fine for this traffic
+    return false;
+  }
+
+  /** Real client IP behind cloudflared (socket is always 127.0.0.1 there). */
+  private String clientIp(HttpExchange ex) {
+    Headers h = ex.getRequestHeaders();
+    String cf = h.getFirst("CF-Connecting-IP");
+    if (cf != null && !cf.isBlank()) return cf.trim();
+    String xff = h.getFirst("X-Forwarded-For");
+    if (xff != null && !xff.isBlank()) return xff.split(",")[0].trim();
+    return ex.getRemoteAddress() == null ? "unknown" : ex.getRemoteAddress().getAddress().getHostAddress();
+  }
+
+  private String rateLimitMessage() {
+    return Objects.toString(cfg.rateLimitedMessage, "Too many attempts. Please wait a few minutes and try again.");
+  }
+
+  // ---- helpers -------------------------------------------------------------
 
   private Map<String, String> parseKv(String raw) {
     Map<String, String> out = new HashMap<>();
@@ -198,9 +243,9 @@ public final class WhitelistHttpServer {
 
   private void sendHtml(HttpExchange ex, int status, String html) throws IOException {
     byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
+    addSecurityHeaders(ex);
     Headers headers = ex.getResponseHeaders();
     headers.add("Content-Type", "text/html; charset=utf-8");
-    headers.add("Cache-Control", "no-store");
     ex.sendResponseHeaders(status, bytes.length);
     try (OutputStream os = ex.getResponseBody()) {
       os.write(bytes);
@@ -209,17 +254,31 @@ public final class WhitelistHttpServer {
 
   private void sendPlain(HttpExchange ex, int status, String text) throws IOException {
     byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+    addSecurityHeaders(ex);
     Headers headers = ex.getResponseHeaders();
     headers.add("Content-Type", "text/plain; charset=utf-8");
-    headers.add("Cache-Control", "no-store");
     ex.sendResponseHeaders(status, bytes.length);
     try (OutputStream os = ex.getResponseBody()) {
       os.write(bytes);
     }
   }
 
+  private void addSecurityHeaders(HttpExchange ex) {
+    Headers h = ex.getResponseHeaders();
+    h.add("Cache-Control", "no-store");
+    h.add("X-Content-Type-Options", "nosniff");
+    h.add("X-Frame-Options", "DENY");
+    h.add("Referrer-Policy", "no-referrer");
+    h.add("Content-Security-Policy", CSP);
+  }
+
   private String escape(String s) {
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+  }
+
+  /** For values placed inside double-quoted HTML attributes (also escapes quotes). */
+  private String escapeAttr(String s) {
+    return escape(s).replace("\"", "&quot;").replace("'", "&#39;");
   }
 
   private String sanitize(String s) {

@@ -178,9 +178,6 @@ public final class WhitelistService {
 
   public String kickMessage(String url, String code) {
     String raw = cfg.kickMessage == null ? "" : cfg.kickMessage;
-    if ("You are not whitelisted. Visit <url> and enter code <code>.".equals(raw)) {
-      raw = "You are not whitelisted. Visit <url> and enter your username and code <code>.";
-    }
     return raw.replace("<url>", Objects.toString(url, ""))
         .replace("<code>", Objects.toString(code, ""));
   }

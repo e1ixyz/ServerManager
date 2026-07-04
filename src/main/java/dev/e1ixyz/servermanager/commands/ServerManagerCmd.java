@@ -88,6 +88,8 @@ public final class ServerManagerCmd implements SimpleCommand {
   private static final List<String> NETWORK_WL_ACTIONS = List.of("list", "add", "remove", "delete");
   private static final List<String> VANILLA_WL_ACTIONS = List.of("list", "add", "remove", "on", "off", "enable", "disable", "status", "state");
   private static final List<String> PREFERENCE_ACTIONS = List.of("set", "clear", "status", "join");
+  // Lifecycle subcommands Crafty mode neutralizes; hidden from help + tab-complete while it's on.
+  private static final java.util.Set<String> CRAFTY_HIDDEN = java.util.Set.of("start", "stop", "hold", "updateplugins");
   private static SubcommandMeta command(String primary, String[] perms, String... aliases) {
     List<String> triggers = new ArrayList<>();
     triggers.add(primary);
@@ -607,6 +609,7 @@ public final class ServerManagerCmd implements SimpleCommand {
         }
         boolean any = false;
         for (HelpEntry entry : HELP_ENTRIES) {
+          if (entry.command() != null && craftyHidden(entry.command().primary())) continue;
           if (entry.visibleTo(src)) {
             src.sendMessage(entry.line());
             any = true;
@@ -753,6 +756,7 @@ public final class ServerManagerCmd implements SimpleCommand {
       return List.of();
     }
     String canonical = meta.primary();
+    if (craftyHidden(canonical)) return List.of();
 
     return switch (canonical) {
       case "start" -> suggestServers(args[1]);
@@ -766,11 +770,17 @@ public final class ServerManagerCmd implements SimpleCommand {
     };
   }
 
+  /** True when Crafty mode is on and this lifecycle subcommand is neutralized (hide it from help/tab-complete). */
+  private boolean craftyHidden(String primary) {
+    return primary != null && plugin.isCraftyModeEnabled() && CRAFTY_HIDDEN.contains(primary);
+  }
+
   private List<String> suggestSubcommands(CommandSource src, String partial) {
     String lower = partial == null ? "" : partial.toLowerCase(Locale.ROOT);
     List<String> matches = new ArrayList<>();
     for (SubcommandMeta meta : SUBCOMMANDS) {
       if (!meta.canUse(src)) continue;
+      if (craftyHidden(meta.primary())) continue;
       for (String trigger : meta.triggers()) {
         if (lower.isEmpty() || trigger.toLowerCase(Locale.ROOT).startsWith(lower)) {
           matches.add(trigger);
