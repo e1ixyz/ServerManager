@@ -20,6 +20,7 @@ import com.velocitypowered.api.event.proxy.ProxyPingEvent;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
+import com.velocitypowered.api.proxy.server.ServerPing;
 import com.velocitypowered.api.scheduler.ScheduledTask;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -98,6 +99,8 @@ public final class PlayerEvents {
 
   /** Lightweight readiness cache: true only after a successful ping. */
   private final Map<String, Boolean> isReadyCache = new ConcurrentHashMap<>();
+  /** Latest backend version (x.y.z) parsed from a successful ping, for the /server menu. */
+  private final Map<String, String> serverVersionCache = new ConcurrentHashMap<>();
   /** Auto-restart schedules for indefinite holds. */
   private final Map<String, RestartSchedule> holdRestartTasks = new ConcurrentHashMap<>();
   private final Set<String> holdRestartInProgress = ConcurrentHashMap.newKeySet();
@@ -205,6 +208,26 @@ public final class PlayerEvents {
       log.info("Network whitelist entries will mirror to: {}", mirrorNetworkWhitelistServers);
     }
 
+    // Crafty mode: ServerManager owns no backend stdin, RCON isn't assumed, and there's no Crafty
+    // command API, so it can never send a live `whitelist reload` — a backend's vanilla whitelist
+    // only ever reflects what was on disk at its last boot. That kicks proxy-approved players who
+    // were whitelisted after boot with the vanilla "not white-listed" message. The Velocity network
+    // whitelist is the authoritative gate here (and backends bind to 127.0.0.1), so make managed
+    // backends stop enforcing their own vanilla whitelist. File mirroring still keeps whitelist.json
+    // populated for the non-Crafty case and for bypass lookups.
+    if (craftyMode() && vanillaWhitelist != null) {
+      for (String server : mirrorNetworkWhitelistServers) {
+        if (!vanillaWhitelist.tracksServer(server)) continue;
+        try {
+          if (vanillaWhitelist.setWhitelistEnabled(server, false)) {
+            log.info("[{}] Crafty mode: disabled vanilla whitelist enforcement; proxy is the sole gate.", server);
+          }
+        } catch (IOException ex) {
+          log.warn("[{}] Crafty mode: failed to disable vanilla whitelist enforcement", server, ex);
+        }
+      }
+    }
+
     Map<String, List<String>> velocityHosts = proxy.getConfiguration().getForcedHosts();
     if (velocityHosts != null && !velocityHosts.isEmpty()) {
       velocityHosts.forEach((host, targets) -> {
@@ -220,8 +243,10 @@ public final class PlayerEvents {
       for (String name : cfg.servers.keySet()) {
         if (craftyMode()) {
           // Crafty owns the process: never start/stop here. Liveness comes from ping only.
-          proxy.getServer(name).ifPresent(rs -> rs.ping().whenComplete((ok, err) ->
-              updateReadiness(name, err == null)));
+          proxy.getServer(name).ifPresent(rs -> rs.ping().whenComplete((ok, err) -> {
+            updateReadiness(name, err == null);
+            recordServerVersion(name, ok, err);
+          }));
           continue;
         }
         refreshHoldRestart(name);
@@ -248,6 +273,7 @@ public final class PlayerEvents {
         }
         proxy.getServer(name).ifPresent(rs -> rs.ping().whenComplete((ok, err) -> {
           updateReadiness(name, err == null);
+          recordServerVersion(name, ok, err);
         }));
       }
     }).delay(Duration.ofSeconds(1)).repeat(Duration.ofSeconds(2)).schedule();
@@ -953,6 +979,27 @@ public final class PlayerEvents {
     return isReady(serverName);
   }
 
+  private static final java.util.regex.Pattern VERSION_TOKEN =
+      java.util.regex.Pattern.compile("\\d+\\.\\d+(?:\\.\\d+)?");
+
+  /** Cache the backend's version from a successful ping; keep just the x.y.z token when present. */
+  private void recordServerVersion(String serverName, ServerPing ping, Throwable err) {
+    if (err != null || ping == null) return;
+    ServerPing.Version v = ping.getVersion();
+    if (v == null) return;
+    String name = v.getName();
+    if (name == null || name.isBlank()) return;
+    var m = VERSION_TOKEN.matcher(name);
+    // ponytail: version.name is usually "Paper 1.21.11" or "1.21.11"; grab the number, else keep raw.
+    String ver = m.find() ? m.group() : name.trim();
+    if (!ver.isBlank()) serverVersionCache.put(serverName, ver);
+  }
+
+  /** Latest known backend version (x.y.z) from ping, or null if never pinged successfully. */
+  public String serverVersion(String serverName) {
+    return serverVersionCache.get(serverName);
+  }
+
   /**
    * When true, an external manager (Crafty Controller) owns the backend processes. ServerManager
    * must not start/stop/restart backends and must decide liveness by ping instead of a process handle.
@@ -1111,12 +1158,8 @@ public final class PlayerEvents {
   }
 
   private String buildWhitelistUrl(String code, String username) {
-    if (!whitelistEnabled()) return "";
-    String base = whitelistCfg.baseUrl;
-    if (base == null || base.isBlank()) {
-      base = "http://" + whitelistCfg.bind + ":" + whitelistCfg.port;
-    }
-    return base;
+    // Login moved from the website to the Discord bot; the kick message's <url> is the Discord invite.
+    return (cfg.discord != null && cfg.discord.invite != null) ? cfg.discord.invite : "";
   }
 
   private boolean whitelistEnabled() {

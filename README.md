@@ -16,7 +16,8 @@ Current backend target: Paper/Spigot `1.21.11` (validated command/whitelist beha
 - Admin `/sm updateplugins` workflow starts a waiting server, moves everyone there, restarts the target backend, then returns everyone once it is ping-ready again.
 - Optional per-server log files so backend stdout/stderr does not spam the Velocity console.
 - Optional macOS per-server Terminal windows (`openConsoleWindow`) for live backend logs plus command input forwarding.
-- Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve web onboarding.
+- Fully configurable player-facing messages, permissions-friendly management commands, and an optional network whitelist with self-serve onboarding through a Discord bot (players run `/link <code>`).
+- Reskinnable `/server` chat menu (replaces Velocity's built-in): a clickable server list with per-server online counts, live version tags, and a hover tooltip of who's connected.
 - Built-in moderation: `/ban`, `/stealthban`, `/ipban`, `/unban`, `/mute`, `/unmute`, `/warn`, plus `/banlist` and `/mutelist`. Banned players are blocked at login so they cannot start backends.
 - In-game `/sm whitelist` tooling to view/add/remove entries from both the network whitelist and any managed vanilla `whitelist.json`.
 - Optional daily auto-restart time for servers held indefinitely, with 1-minute and 5-second warnings broadcast in-game.
@@ -154,7 +155,7 @@ whitelist:
   bind: "127.0.0.1"                 # localhost-only; put a reverse proxy (e.g. cloudflared) in front
   port: 8081
   baseUrl: "http://127.0.0.1:8081"
-  kickMessage: "You are not whitelisted. Visit <url> and enter code <code>."
+  kickMessage: "You are not whitelisted. Join our Discord ( <url> ) and run /link <code>"
   codeLength: 6
   codeTtlSeconds: 900
   dataFile: "network-whitelist.yml"
@@ -167,6 +168,31 @@ whitelist:
   maxAttempts: 10                   # redemption attempts allowed per client IP per window
   windowSeconds: 300                # sliding rate-limit window
   rateLimitedMessage: "Too many attempts. Please wait a few minutes and try again."
+
+# Whitelist redemption is handled by a Discord bot. The bot token is read from the
+# SM_DISCORD_TOKEN environment variable ONLY (never from this file).
+discord:
+  enabled: false
+  guildId: ""       # Discord guild (server) id where slash commands register
+  invite: ""        # invite URL shown in the kick message as <url>
+  linkSuccess: "Linked! You are now whitelisted — rejoin the Minecraft server."
+  linkFailure: "That code is invalid or expired. Rejoin Minecraft to get a fresh code."
+
+# Reskinnable /server chat menu (replaces Velocity's built-in /server). MiniMessage.
+serverMenu:
+  enabled: true
+  header: "<gray>Network servers:</gray>"
+  footer: ""
+  entry: "<white><server></white> <state>"
+  version: "<dark_gray>(<white><version></white>)</dark_gray>"
+  stateOnline: "<green>online</green>"
+  stateOffline: "<red>offline</red>"
+  showOffline: true
+  tooltipHeader: "<gray>Players:</gray>"
+  tooltipPlayer: "<white><player></white>"
+  tooltipEmpty: "<gray>empty</gray>"
+  tooltipMore: "<gray>+<count> more</gray>"
+  tooltipMaxPlayers: 10
 
 moderation:
   enabled: true
@@ -203,12 +229,13 @@ Key points:
 - Live vanilla whitelist console updates are now held until the backend responds to ping; file updates always happen immediately so offline servers still apply changes on next boot.
 - `startupGraceSeconds` is added once to the proxy-empty stop timer if a server just started to avoid killing a fresh boot.
 - `reconnectWindowSeconds` controls how long a player who leaves or disconnects will be sent back to their last managed backend on rejoin. Set it to `0` to disable the feature.
-- Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a short URL and one-time code and can redeem it through the built-in HTTP form.
+- Network whitelist (`whitelist:` block) is optional. When enabled, joining players are checked against `network-whitelist.yml`. Non-whitelisted players are kicked with a one-time code and redeem it by running `/link <code>` (or `/whitelist <code>`) with the network's Discord bot; the code is bound to their authenticated UUID, so there is no username to typo. Enable the bot with the `discord:` block and supply its token via the `SM_DISCORD_TOKEN` environment variable.
+- The HTTP-era whitelist fields (`bind`, `port`, `baseUrl`, `pageTitle`, `pageSubtitle`, `successMessage`, `failureMessage`, `buttonText`, `maxAttempts`, `windowSeconds`, `rateLimitedMessage`) are **legacy and ignored** since redemption moved to Discord; they remain in the generated config only for backward compatibility.
 - `allowVanillaBypass: true` remains the default for the primary backend when the per-server flag is not set. Set it to `false` if you want even the primary server to ignore its vanilla whitelist entirely.
 - `moderation:` controls the proxy-level moderation registry used by the standalone `/ban`, `/stealthban`, `/ipban`, `/mute`, `/warn`, and list commands. When enabled (default) bans are enforced at login, before any backend starts.
 - `autoIpBan:` enables lightweight rate-based IP bans for ping/login spam; set `dryRun: true` to log-only first and add trusted IPs for your proxy/CDN.
 - `compatibility.serverBridge.enabled: true` turns on the explicit companion-plugin API used by `ServerBridge`. Leave it `false` if you want `ServerManager` to behave as a standalone start-on-demand plugin only.
-- `compatibility.crafty.enabled: true` hands **backend process lifecycle** to an external manager (Crafty Controller). `ServerManager` then never starts/stops/restarts backends and decides whether a server is "online" by **pinging** it instead of by a process handle it owns. Whitelist, the login webpage, bans/moderation, MOTD, and forced-host routing keep working. See **Crafty Compatibility** below for the full keep/lose list. Default `false`, which preserves all existing behavior.
+- `compatibility.crafty.enabled: true` hands **backend process lifecycle** to an external manager (Crafty Controller). `ServerManager` then never starts/stops/restarts backends and decides whether a server is "online" by **pinging** it instead of by a process handle it owns. Whitelist, the Discord link bot, bans/moderation, MOTD, and forced-host routing keep working. See **Crafty Compatibility** below for the full keep/lose list. Default `false`, which preserves all existing behavior.
 
 ## ServerBridge Compatibility
 
@@ -254,7 +281,7 @@ compatibility:
 
 **Kept, unchanged** (none of these depend on owning the process):
 
-- Network code-whitelist and the `login.merp.quest` webpage.
+- Network code-whitelist and the Discord `/link` bot.
 - Per-connect whitelist gating (vanilla bypass, mirror-network-whitelist).
 - Bans / mutes / warns and stealth-ban kicks.
 - Auto-IP-ban flood protection.
@@ -285,22 +312,22 @@ longer triggers a process start.
 2. If their UUID or username exists in `network-whitelist.yml`, or (optionally) in the primary backend's `whitelist.json`, they proceed normally.
 3. Otherwise the plugin:
    - Issues a short numeric code **bound to that player's authenticated UUID** and stores it in-memory.
-   - Disconnects the player with the configured `kickMessage`, replacing `<url>` and `<code>`.
+   - Disconnects the player with the configured `kickMessage`, replacing `<url>` (the Discord invite) and `<code>`.
    - Keeps backend servers off until the player is verified (avoiding accidental auto-starts).
-4. The player visits the web form served by the embedded HTTP server (reachable at `baseUrl`).
-5. They enter **only the code** — because it's tied to their UUID, redeeming it whitelists the exact
-   account it was issued to (no username field, so no way to typo the wrong name). The plugin writes
-   the entry to `network-whitelist.yml` and shows a success message instructing them to reconnect.
+4. The player opens the network's Discord (invite shown as `<url>` in the kick message) and runs
+   `/link <code>` (alias `/whitelist <code>`) with the ServerManager bot.
+5. The bot redeems the code against the exact UUID it was issued to — because it's tied to their UUID,
+   there's no username to typo — records their `discordId`, writes the entry to `network-whitelist.yml`,
+   and replies (ephemerally) telling them to reconnect.
 
 Notes:
-- `bind` / `port` define the listen address. `bind` defaults to `127.0.0.1`; put a reverse proxy
-  (e.g. cloudflared) in front for HTTPS and set `baseUrl` to the public URL.
+- The bot registers its `/link` and `/whitelist` slash commands per-guild (`discord.guildId`) and always
+  replies ephemerally. It starts only when `discord.enabled: true`, `guildId` is set, and the
+  `SM_DISCORD_TOKEN` environment variable holds a valid bot token; otherwise it logs why and stays off.
 - Codes expire after `codeTtlSeconds` and are one-time. A wrong code isn't consumed, so retries work.
-- **Security:** the page is rate-limited per client IP (`maxAttempts` / `windowSeconds`, read from
-  `CF-Connecting-IP` behind Cloudflare), caps request bodies, sends a strict CSP + `X-Frame-Options`/
-  `X-Content-Type-Options`/`Referrer-Policy`, and escapes all reflected input. Keep `bind` on localhost
-  behind the proxy so the port isn't exposed on the public interface.
 - `network-whitelist.yml` is written atomically and can be edited manually while Velocity is offline if needed.
+- Operational note: if `whitelist.enabled: true` but the Discord bot isn't wired up (`discord.enabled: false`
+  or a blank `invite`/token), non-whitelisted players have no way to redeem — there is no web fallback.
 
 ## Forced-Host Overrides
 - Each hostname under `forcedHosts` maps to a managed server name. When a player joins through that host (including their very first proxy join), the plugin starts that backend instead of the primary start-on-join server.
@@ -352,7 +379,7 @@ Root command aliases: `/servermanager`, `/sm`
 | `help`     | `servermanager.command.help`                | Prints the command overview along with `hold` syntax. |
 | `hold`     | `servermanager.command.hold`                | Keeps the backend running for the requested duration (accepts `30m`, `2h`, `1h30m`, or `forever`). Starts the server automatically if it is offline. |
 | `updateplugins` | `servermanager.command.updateplugins`  | Starts a waiting backend, moves all online players there, restarts the target backend, and returns everyone once the target is ready again. |
-| `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the whitelist web server, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
+| `reload`   | `servermanager.command.reload`              | Reloads configuration, restarts the Discord bot, syncs whitelist data, and keeps running managed servers online (stopping only those removed from config). |
 | `whitelist`| `servermanager.command.whitelist`           | Views/adds/removes entries from the network whitelist and any managed vanilla `whitelist.json`, and toggles vanilla whitelist enforcement per server. |
 | `preference` (`pref`, `joinpref`) | None (available to all players) | Sets/clears/shows each player's preferred first-join backend, with optional immediate connect via `join`. |
 
@@ -363,6 +390,12 @@ Durations default to minutes when no unit is supplied. Use `forever` for an inde
 \* Any of `servermanager.command.*`, `servermanager.*`, or legacy `startonjoin.*` nodes also satisfy the checks. Console sources bypass permission checks automatically.
 
 `/sm reload` refreshes the plugin runtime and whitelist services without interrupting running managed servers. Only servers removed from the configuration are stopped during the reload.
+
+### Server menu (`/server`)
+When `serverMenu.enabled: true`, ServerManager unregisters Velocity's built-in `/server` and takes it over:
+- `/server` (no argument) shows the config-driven clickable network menu — each entry hovers to reveal connected players (capped at `serverMenu.tooltipMaxPlayers`) and a live version tag, and clicks to join.
+- `/server <name>` connects the player through the normal `createConnectionRequest` path, so start-on-join, whitelist gating, and queueing still apply.
+Managed servers are listed in config order, then any other Velocity server. All strings are MiniMessage; set `serverMenu.enabled: false` to keep Velocity's default `/server`.
 
 ### Whitelist management (`/sm whitelist`)
 - `network list` shows the first 20 entries in `network-whitelist.yml` (with a count of any remaining). Use `network add <player|uuid> [name]` to add an online player or explicit UUID, and `network remove <player|uuid>` to revoke access. Adding a player mirrors them into every server that sets `mirrorNetworkWhitelist: true`.
@@ -403,3 +436,4 @@ Permissions: `servermanager.moderation.ban`, `.stealthban`, `.ipban`, `.unban`, 
 - `ServerProcessManager` and `ManagedServer` encapsulate per-server process control.
 - `PlayerEvents` orchestrates player flow, MOTD updates, start queues, and shutdown scheduling.
 - The project targets Java 17. SnakeYAML is shaded and relocated into `dev.e1ixyz.servermanager.lib.snakeyaml`; MiniMessage/Adventure are `provided` by Velocity at runtime (do not shade them). Keep that baseline when contributing.
+- JDA (`net.dv8tion:JDA`) powers the Discord bot and is shaded **un-minimized** (`minimizeJar=false`) because JDA loads classes reflectively; the build also sets `-proc:none` so the Velocity annotation processor never runs against the hand-written manifest. Expect a noticeably larger shaded jar as a result.

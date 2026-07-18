@@ -1,11 +1,12 @@
 package dev.e1ixyz.servermanager;
 
 import dev.e1ixyz.servermanager.commands.ServerManagerCmd;
+import dev.e1ixyz.servermanager.commands.ServerMenuCmd;
 import dev.e1ixyz.servermanager.listeners.PlayerEvents;
 import dev.e1ixyz.servermanager.maps.MapsHttpServer;
 import dev.e1ixyz.servermanager.moderation.ModerationService;
 import dev.e1ixyz.servermanager.preferences.JoinPreferenceService;
-import dev.e1ixyz.servermanager.whitelist.WhitelistHttpServer;
+import dev.e1ixyz.servermanager.discord.DiscordBot;
 import dev.e1ixyz.servermanager.whitelist.WhitelistService;
 import dev.e1ixyz.servermanager.whitelist.VanillaWhitelistChecker;
 import com.google.inject.Inject;
@@ -44,12 +45,13 @@ public final class ServerManagerPlugin {
   private Config config;
   private ServerProcessManager processManager;
   private WhitelistService whitelistService;
-  private WhitelistHttpServer whitelistHttpServer;
+  private DiscordBot discordBot;
   private MapsHttpServer mapsHttpServer;
   private VanillaWhitelistChecker vanillaWhitelist;
   private JoinPreferenceService joinPreferences;
   private PlayerEvents playerEvents;
   private ServerManagerCmd rootCommand;
+  private ServerMenuCmd serverMenuCommand;
   private ModerationService moderation;
   private ModerationCommands moderationCommands;
   private final Set<ManagedLifecycleListener> lifecycleListeners = ConcurrentHashMap.newKeySet();
@@ -76,6 +78,15 @@ public final class ServerManagerPlugin {
       cm.register(meta, rootCommand);
       registerModerationCommands();
 
+      // Reskinned /server chat menu: replace Velocity's built-in when enabled.
+      if (config.serverMenu != null && config.serverMenu.enabled) {
+        if (cm.hasCommand("server")) cm.unregister("server");
+        this.serverMenuCommand = new ServerMenuCmd(this, proxy, logger);
+        this.serverMenuCommand.updateState(config);
+        cm.register(cm.metaBuilder("server").plugin(this).build(), serverMenuCommand);
+        logger.info("ServerManager: /server menu enabled (replaced built-in).");
+      }
+
       logger.info("ServerManager initialized. Primary: {}", config.primaryServerName());
     } catch (Exception ex) {
       logger.error("Failed to initialize ServerManager", ex);
@@ -89,8 +100,8 @@ public final class ServerManagerPlugin {
       if (processManager != null) {
         processManager.beginShutdown();
       }
-      if (whitelistHttpServer != null) {
-        whitelistHttpServer.stop();
+      if (discordBot != null) {
+        discordBot.stop();
       }
       if (mapsHttpServer != null) {
         mapsHttpServer.stop();
@@ -128,9 +139,9 @@ public final class ServerManagerPlugin {
   public synchronized boolean reload() {
     logger.info("Reloading ServerManager...");
     try {
-      if (whitelistHttpServer != null) {
-        whitelistHttpServer.stop();
-        whitelistHttpServer = null;
+      if (discordBot != null) {
+        discordBot.stop();
+        discordBot = null;
       }
       if (mapsHttpServer != null) {
         mapsHttpServer.stop();
@@ -170,8 +181,8 @@ public final class ServerManagerPlugin {
     this.joinPreferences = new JoinPreferenceService(logger, dataDir);
     shutdownModeration();
     this.moderation = new ModerationService(newConfig.moderation, logger, dataDir);
-    this.whitelistHttpServer = new WhitelistHttpServer(newConfig.whitelist, logger, whitelistService);
-    this.whitelistHttpServer.start();
+    this.discordBot = new DiscordBot(newConfig.discord, System.getenv("SM_DISCORD_TOKEN"), whitelistService, logger);
+    this.discordBot.start();
     this.mapsHttpServer = new MapsHttpServer(newConfig.maps, logger);
     this.mapsHttpServer.start();
     this.playerEvents = new PlayerEvents(this, proxy, newConfig, processManager, logger,
@@ -180,6 +191,9 @@ public final class ServerManagerPlugin {
     registerModerationCommands();
     if (rootCommand != null) {
       rootCommand.updateState(processManager, newConfig, whitelistService, vanillaWhitelist, moderation, joinPreferences);
+    }
+    if (serverMenuCommand != null) {
+      serverMenuCommand.updateState(newConfig);
     }
   }
 
@@ -233,6 +247,11 @@ public final class ServerManagerPlugin {
       return playerEvents != null && playerEvents.isServerReady(server);
     }
     return processManager.isRunning(server);
+  }
+
+  /** Latest backend version (x.y.z) seen via ping, or null if unknown. Used by the /server menu. */
+  public String serverVersion(String server) {
+    return playerEvents != null ? playerEvents.serverVersion(server) : null;
   }
 
   public CompletableFuture<Boolean> ensureServerReady(String server) {

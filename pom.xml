@@ -48,6 +48,25 @@
       <version>4.26.1</version>
       <scope>provided</scope>
     </dependency>
+
+    <!-- JDA: hosts the Discord whitelist bot (/link, /whitelist). Shaded in; Velocity
+         isolates plugin classloaders so no relocation is needed. slf4j is provided by
+         Velocity; voice (opus-java) is unused. -->
+    <dependency>
+      <groupId>net.dv8tion</groupId>
+      <artifactId>JDA</artifactId>
+      <version>5.6.1</version>
+      <exclusions>
+        <exclusion>
+          <groupId>club.minnced</groupId>
+          <artifactId>opus-java</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>slf4j-api</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
   </dependencies>
 
   <build>
@@ -70,7 +89,9 @@
                 </relocation>
               </relocations>
               <createDependencyReducedPom>true</createDependencyReducedPom>
-              <minimizeJar>true</minimizeJar>
+              <!-- JDA relies heavily on reflection; minimizeJar would strip classes it
+                   loads dynamically and break the bot. Keep the full dependency set. -->
+              <minimizeJar>false</minimizeJar>
             </configuration>
           </execution>
         </executions>
@@ -82,6 +103,11 @@
         <version>3.11.0</version>
         <configuration>
           <release>17</release>
+          <!-- velocity-plugin.json is hand-written in resources; disable annotation
+               processing so the Velocity AP (which pulls gson) is not auto-run. -->
+          <compilerArgs>
+            <arg>-proc:none</arg>
+          </compilerArgs>
         </configuration>
       </plugin>
     </plugins>

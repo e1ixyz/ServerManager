@@ -25,7 +25,7 @@
                 </relocation>
               </relocations>
               <createDependencyReducedPom>true</createDependencyReducedPom>
-              <minimizeJar>true</minimizeJar>
+              <minimizeJar>false</minimizeJar>
             </configuration>
           </execution>
         </executions>
@@ -35,6 +35,9 @@
         <version>3.11.0</version>
         <configuration>
           <release>17</release>
+          <compilerArgs>
+            <arg>-proc:none</arg>
+          </compilerArgs>
         </configuration>
       </plugin>
     </plugins>

@@ -18,6 +18,7 @@ public final class Config {
   public int reconnectWindowSeconds = 60;
 
   public Motd motd = new Motd();
+  public ServerMenu serverMenu = new ServerMenu();
   public Map<String, ServerConfig> servers = new LinkedHashMap<>();
   /** Optional forced-host overrides keyed by hostname (case-insensitive). */
   public Map<String, ForcedHost> forcedHosts = new LinkedHashMap<>();
@@ -27,6 +28,7 @@ public final class Config {
   public Moderation moderation = new Moderation();
   public AutoIpBan autoIpBan = new AutoIpBan();
   public Compatibility compatibility = new Compatibility();
+  public Discord discord = new Discord();
 
   public static final class Motd {
     public String offline  = "<gray>Your Network</gray> <gray>- <white><server></white></gray>";
@@ -35,6 +37,29 @@ public final class Config {
     public String starting2 = "<gray>Please wait...</gray>";
     public String online   = "<gray>Your Network</gray> <gray>- <white><server></white></gray>";
     public String online2  = "<green><bold>Server Online</bold></green>";
+  }
+
+  /**
+   * Reskin for the {@code /server} chat menu (replaces Velocity's built-in). All strings are
+   * MiniMessage. Placeholders: entry -&gt; &lt;server&gt; &lt;count&gt; &lt;state&gt;;
+   * tooltipHeader -&gt; &lt;server&gt; &lt;count&gt;; tooltipPlayer -&gt; &lt;player&gt;; tooltipMore -&gt; &lt;count&gt;.
+   * Toggling {@code enabled} takes effect on proxy restart; every other field is live on /sm reload.
+   */
+  public static final class ServerMenu {
+    public boolean enabled = true;
+    public String header  = "<gradient:#00d2ff:#3a7bd5><bold>Network Servers</bold></gradient>";
+    public String footer  = "<gray><italic>Hover a server to see who's on. Click to join.</italic></gray>";
+    public String entry   = "  <gray>▸</gray> <aqua><server></aqua> <dark_gray>(<count> online)</dark_gray> <version> <state>";
+    /** Rendered in the entry's <version> slot from the backend's last ping; blank when offline/unknown. */
+    public String version = "<dark_gray>[<version>]</dark_gray>";
+    public String stateOnline  = "<green>●</green>";
+    public String stateOffline = "<red>●</red>";
+    public String tooltipHeader = "<aqua><bold><server></bold></aqua> <gray>— <count> online</gray>";
+    public String tooltipPlayer = "<white>• <player></white>";
+    public String tooltipEmpty  = "<dark_gray><italic>(empty)</italic></dark_gray>";
+    public String tooltipMore   = "<dark_gray><italic>…and <count> more</italic></dark_gray>";
+    public int tooltipMaxPlayers = 15;
+    public boolean showOffline = true;
   }
 
   public static final class Messages {
@@ -105,7 +130,7 @@ public final class Config {
     public String bind = "127.0.0.1"; // localhost-only; cloudflared reaches it locally
     public int port = 8081;
     public String baseUrl = "http://127.0.0.1:8081";
-    public String kickMessage = "You are not whitelisted. Visit <url> and enter code <code>.";
+    public String kickMessage = "You are not whitelisted. Join our Discord ( <url> ) and run /link <code>";
     public int codeLength = 6;
     public int codeTtlSeconds = 900;
     public String dataFile = "network-whitelist.yml";
@@ -119,6 +144,16 @@ public final class Config {
     public int maxAttempts = 10;
     public int windowSeconds = 300;
     public String rateLimitedMessage = "Too many attempts. Please wait a few minutes and try again.";
+  }
+
+  /** Discord bot that replaces the whitelist website: members run /link|/whitelist &lt;code&gt;. */
+  public static final class Discord {
+    public boolean enabled = false;
+    public String guildId = "";   // Discord server (guild) id; slash commands register here for instant visibility
+    public String invite = "";    // invite URL shown in the in-game kick message (<url> placeholder)
+    public String linkSuccess = "Linked! You are now whitelisted — rejoin the Minecraft server.";
+    public String linkFailure = "That code is invalid or expired. Rejoin Minecraft to get a fresh code.";
+    // The bot token is read from the SM_DISCORD_TOKEN environment variable, never from this file.
   }
 
   public static final class Maps {
@@ -203,6 +238,23 @@ public final class Config {
           starting2: "<gray>Please wait...</gray>"
           online:   "<gray>Your Network</gray> <gray>- <white><server></white></gray>"
           online2:  "<green><bold>Server Online</bold></green>"
+        serverMenu:
+          # Reskins /server (replaces Velocity's built-in). All values are MiniMessage.
+          # enabled toggle needs a proxy restart; everything else is live on /sm reload.
+          enabled: true
+          header:  "<gradient:#00d2ff:#3a7bd5><bold>Network Servers</bold></gradient>"
+          footer:  "<gray><italic>Hover a server to see who's on. Click to join.</italic></gray>"
+          entry:   "  <gray>▸</gray> <aqua><server></aqua> <dark_gray>(<count> online)</dark_gray> <version> <state>"
+          # <version> is filled from the backend's last ping (blank when offline/unknown).
+          version: "<dark_gray>[<version>]</dark_gray>"
+          stateOnline:  "<green>●</green>"
+          stateOffline: "<red>●</red>"
+          tooltipHeader: "<aqua><bold><server></bold></aqua> <gray>— <count> online</gray>"
+          tooltipPlayer: "<white>• <player></white>"
+          tooltipEmpty:  "<dark_gray><italic>(empty)</italic></dark_gray>"
+          tooltipMore:   "<dark_gray><italic>…and <count> more</italic></dark_gray>"
+          tooltipMaxPlayers: 15
+          showOffline: true
         messages:
           startingQueued: "<yellow>Starting <white><server></white>… You'll be sent automatically.</yellow>"
           startFailed:    "<red>Failed to start <white><server></white>. Try again.</red>"
@@ -284,7 +336,7 @@ public final class Config {
           bind: "127.0.0.1"
           port: 8081
           baseUrl: "http://127.0.0.1:8081"
-          kickMessage: "You are not whitelisted. Visit <url> and enter code <code>."
+          kickMessage: "You are not whitelisted. Join our Discord ( <url> ) and run /link <code>"
           codeLength: 6
           codeTtlSeconds: 900
           dataFile: "network-whitelist.yml"
@@ -305,6 +357,12 @@ public final class Config {
           tabs:
             - { label: "SMP",  path: "smp",  backend: "http://127.0.0.1:8124" }
             - { label: "SMP2", path: "smp2", backend: "http://127.0.0.1:8123" }
+        discord:
+          enabled: false
+          guildId: ""
+          invite: ""
+          linkSuccess: "Linked! You are now whitelisted — rejoin the Minecraft server."
+          linkFailure: "That code is invalid or expired. Rejoin Minecraft to get a fresh code."
         moderation:
           enabled: true
           dataFile: "moderation.yml"
@@ -356,6 +414,7 @@ public final class Config {
       throw new IllegalStateException("Exactly one server must have startOnJoin: true");
 
     if (cfg.motd == null) cfg.motd = new Motd();
+    if (cfg.serverMenu == null) cfg.serverMenu = new ServerMenu();
     if (cfg.messages == null) cfg.messages = new Messages();
     if (cfg.messages.stealthBanKickMessages == null || cfg.messages.stealthBanKickMessages.isEmpty()) {
       cfg.messages.stealthBanKickMessages = new ArrayList<>(Messages.defaultStealthBanKickMessages());
@@ -372,6 +431,7 @@ public final class Config {
     if (cfg.compatibility == null) cfg.compatibility = new Compatibility();
     if (cfg.compatibility.serverBridge == null) cfg.compatibility.serverBridge = new ServerBridgeCompatibility();
     if (cfg.compatibility.crafty == null) cfg.compatibility.crafty = new CraftyCompatibility();
+    if (cfg.discord == null) cfg.discord = new Discord();
     if (cfg.forcedHosts == null) cfg.forcedHosts = new LinkedHashMap<>();
 
     if (cfg.startupGraceSeconds < 0) cfg.startupGraceSeconds = 0;

@@ -2,6 +2,7 @@
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/whitelist/VanillaWhitelistChecker.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/ServerConfig.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/commands/StatusCmd.java
+/Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/discord/DiscordBot.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/ServerProcessManager.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/commands/StopCmd.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/moderation/ModerationService.java
@@ -12,9 +13,9 @@
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/maps/MapsHttpServer.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/preferences/JoinPreferenceService.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/Config.java
-/Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/whitelist/WhitelistHttpServer.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/commands/StartCmd.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/ManagedServerState.java
+/Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/commands/ServerMenuCmd.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/moderation/AutoIpBanService.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/ServerManagerPlugin.java
 /Users/elimcgehee/Desktop/Code/INDEV/MC/Velocity/ServerManager/src/main/java/dev/e1ixyz/servermanager/commands/ModerationCommands.java

@@ -31,7 +31,7 @@ public final class WhitelistService {
     boolean expired() { return System.currentTimeMillis() > expiresAt; }
   }
 
-  public record Entry(UUID uuid, String lastKnownName, long addedAt) {}
+  public record Entry(UUID uuid, String lastKnownName, long addedAt, String discordId) {}
 
   private final Config.Whitelist cfg;
   private final Logger log;
@@ -81,8 +81,12 @@ public final class WhitelistService {
   }
 
   public synchronized Entry add(UUID uuid, String username) throws IOException {
+    return add(uuid, username, null);
+  }
+
+  public synchronized Entry add(UUID uuid, String username, String discordId) throws IOException {
     long now = System.currentTimeMillis();
-    Entry entry = new Entry(uuid, username, now);
+    Entry entry = new Entry(uuid, username, now, discordId);
     Entry previous = entriesByUuid.put(uuid, entry);
     if (previous != null && previous.lastKnownName() != null && !previous.lastKnownName().isBlank()) {
       entriesByName.remove(previous.lastKnownName().toLowerCase(Locale.ROOT));
@@ -150,6 +154,10 @@ public final class WhitelistService {
   }
 
   public synchronized RedeemResult redeemWithReason(String code, String providedUsername) throws IOException {
+    return redeemWithReason(code, providedUsername, null);
+  }
+
+  public synchronized RedeemResult redeemWithReason(String code, String providedUsername, String discordId) throws IOException {
     if (code == null || code.isBlank()) return RedeemResult.fail("code blank");
     purgeExpiredCodes();
 
@@ -172,7 +180,7 @@ public final class WhitelistService {
     }
 
     String finalName = !provided.isBlank() ? provided : original;
-    add(pc.uuid(), finalName);
+    add(pc.uuid(), finalName, discordId);
     return RedeemResult.success();
   }
 
@@ -214,7 +222,8 @@ public final class WhitelistService {
       if (uuid == null) continue;
       String name = Objects.toString(map.get("name"), null);
       long added = parseLong(map.get("addedAt"), System.currentTimeMillis());
-      Entry entry = new Entry(uuid, name, added);
+      String discordId = Objects.toString(map.get("discordId"), null);
+      Entry entry = new Entry(uuid, name, added, discordId);
       entriesByUuid.put(uuid, entry);
       if (name != null && !name.isBlank()) {
         entriesByName.put(name.toLowerCase(Locale.ROOT), entry);
@@ -233,6 +242,9 @@ public final class WhitelistService {
       map.put("name", entry.lastKnownName());
       map.put("addedAt", entry.addedAt());
       map.put("addedAtIso", Instant.ofEpochMilli(entry.addedAt()).toString());
+      if (entry.discordId() != null && !entry.discordId().isBlank()) {
+        map.put("discordId", entry.discordId());
+      }
       rows.add(map);
     }
     StringWriter sw = new StringWriter();
